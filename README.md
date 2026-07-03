@@ -1,6 +1,6 @@
 # ESP-Nix 0.6.9
 
-![ESP-Nix logo](ESP_NIX_Small.png)
+![ESP-Nix logo](ESP_NIX.png)
 
 A minimal declarative operating system for ESP32 with a Unix-like shell interface.
 
