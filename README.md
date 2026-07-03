@@ -26,6 +26,7 @@ A minimal declarative operating system for ESP32 with a Unix-like shell interfac
 - **NTP time sync**: `ntp` (or automatically on `web -join`) sets the system clock over WiFi, so `date` is actually correct
 - **Cursor-aware editor**: arrow keys move within a line for mid-line edits; `:d<n>`/`:i<n>` delete or insert by line number
 - **Archive support**: `extract`/`compress` handle real `.zip` plus `.tar.gz`/`.tgz`/`.gz`/`.tar`
+- **`nixfetch`**: a neofetch-style system summary — logo plus live stats (uptime, memory, disk, CPU) side by side, logo customizable via `/etc/settings/logo.txt`
 
 ## Hardware
 
@@ -373,6 +374,27 @@ Number-prefix filenames (`01-`, `02-`, ...) if execution order matters, same con
 ### Automatic NTP Sync at Boot
 
 If a WiFi network is already saved (`web -join` sets `WIFI_SSID`/`WIFI_PASS`), the clock syncs automatically on every boot, before `/boot` scripts run — no need to run `ntp` manually after each restart. If no network is saved yet, this step is skipped entirely rather than stalling boot on a connection attempt that has nowhere to connect to.
+
+### nixfetch
+
+A neofetch-style system summary — logo on the left, live stats on the right:
+
+```
+nix:/$ nixfetch
+   .--.          root@esp-nix
+  |o_o |         ------------
+  |:_/ |         OS: ESP-Nix 0.6.9
+ //   \ \        Host: ESP32 WROOM32E
+(|     | )       Kernel: FreeRTOS
+/'\_   _/`\      Uptime: 2m
+\___)=(___/      Shell: /bin/nix
+                 CPU: Xtensa LX6 @ 240MHz (2 cores)
+                 Memory: 73KB / 302KB
+                 Disk (/): 48KB / 1408KB
+                 Disk (/sd): 1MB / 29709MB
+```
+
+The logo isn't compiled into firmware — it's read live from `/etc/settings/logo.txt` (auto-created with a small default penguin on first boot), so replacing it is just `edit /etc/settings/logo.txt`, no rebuild required.
 
 ### WiFi File Server + Browser Terminal
 
