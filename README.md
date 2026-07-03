@@ -1,4 +1,4 @@
-# ESP-Nix 0.6.9
+# ESP-Nix
 
 ![ESP-Nix logo](ESP_NIX.png)
 
