@@ -1,0 +1,11 @@
+   .--.          root@esp-nix
+  |o_o |         ------------
+  |:_/ |         OS: ESP-Nix 0.6.9
+ //   \ \        Host: ESP32 WROOM32E
+(|     | )       Kernel: FreeRTOS
+/'\_   _/`\      Uptime: 2m
+\___)=(___/      Shell: /bin/nix
+                 CPU: Xtensa LX6 @ 240MHz (2 cores)
+                 Memory: 73KB / 302KB
+                 Disk (/): 48KB / 1408KB
+                 Disk (/sd): 1MB / 29709MB

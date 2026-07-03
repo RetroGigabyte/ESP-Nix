@@ -1,0 +1,5 @@
+.pio/
+.DS_Store
+old_fw/
+elks-0.9.1/
+*.esp_update
