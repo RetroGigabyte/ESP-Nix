@@ -30,11 +30,12 @@ A minimal declarative operating system for ESP32 with a Unix-like shell interfac
 
 ## Hardware
 
-- **ESP32 WROOM32E** (no external RAM required)
-- **I2C LCD1602** (16x2 character display)
-- **SD card module** (SD_MMC/SDIO, optional — boots fine without one inserted)
+- **ESP32 WROOM32E** (required, no external RAM needed)
+- **I2C LCD1602** (16x2 character display) and **SD card module** (SD_MMC/SDIO) — both recommended, not required. The shell works entirely over Serial or the browser terminal without the LCD, and without SD the system just runs off internal LittleFS — you'd lose `web`, `extract`/`compress` of large archives, and general extra storage.
 - **PS/2 keyboard** (optional — works alongside Serial/USB input)
 - Serial connection via USB
+
+**Recommended kit:** the [SunFounder ESP32 Ultimate Starter Kit (with camera extension board and battery)](https://www.sunfounder.com/products/sunfounder-esp32-ultimate-starter-kit-with-esp32-camera-extension-board-battery) covers the ESP32 board, LCD, and SD adapter this project was built and tested against, in one bundle.
 
 ### Hardware Connections
 
@@ -623,24 +624,28 @@ src/
 
 ## Limitations
 
-- **No external storage** beyond 1MB LittleFS
-- **Single user** (root only)
-- **No mid-line cursor editing** — left/right arrows aren't supported, only backspace
+- **Single user** (root only) — no accounts or permissions system
 - **Limited to 255 char** command lines
 - **History is in-memory only** — cleared on reboot
+- **Browser terminal is request/response, not a live stream** — full-screen commands like `edit` need Serial or PS/2
+- **No `.7z` support** — LZMA's dictionary requirements (1MB–64MB) exceed the ESP32's entire 320KB of RAM, a hardware ceiling rather than a missing feature
+- **No real memory swap** — the ESP32 has no paging MMU, so this isn't feasible on this hardware at all
 
 ## Next Steps
 
 Potential enhancements:
-- WiFi/telnet remote shell
-- NTP time sync (`date` currently reads a clock that's never set)
-- Package/module system
-- User management
-- Permissions system
+- Telnet/raw-socket remote shell (drop USB entirely for daily use)
+- User accounts and permissions
+- `PATH`-style multiple script directories, not just `/system`
+
+## Credits
+
+- The `web` file server started from [GPT_ESP32-File_network](https://github.com/RetroGigabyte/GPT_ESP32-File_network), extended here with the browser terminal, WiFi network joining, and SD-hosted page templates.
 
 ## References
 
-- [SPIFFS Documentation](https://github.com/espressif/spiffs)
 - [ESP32 Arduino Core](https://github.com/espressif/arduino-esp32)
 - [NixOS](https://nixos.org) - Inspiration for declarative configuration
 - [FreeRTOS](https://www.freertos.org/) - Underlying RTOS
+- [miniz](https://github.com/richgel999/miniz) - Vendored for real `.zip` support
+- [ESP32-targz](https://github.com/tobozo/ESP32-targz) - `.tar`/`.gz`/`.tar.gz` support
