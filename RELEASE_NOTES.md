@@ -34,3 +34,6 @@ A declarative, Unix-like shell operating system for the ESP32 — built from scr
 - PS/2 keyboard — optional, auto-detected at boot
 
 **Recommended kit:** the [SunFounder ESP32 Ultimate Starter Kit (with camera extension board and battery)](https://www.sunfounder.com/products/sunfounder-esp32-ultimate-starter-kit-with-esp32-camera-extension-board-battery) covers the ESP32 board, LCD, and SD adapter this project was built and tested against, in one bundle.
+
+## Credits
+- The `web` file server started from [GPT_ESP32-File_network](https://github.com/RetroGigabyte/GPT_ESP32-File_network), extended with the browser terminal, WiFi network joining, and SD-hosted page templates in this project.
