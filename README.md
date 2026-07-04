@@ -34,6 +34,8 @@ A minimal declarative operating system for ESP32 with a Unix-like shell interfac
 - **`wget`**: downloads a URL straight to a file
 - **`ftp get`/`put`/`ls`**: FTP client for pushing/pulling files to/from a remote FTP server
 - **`retron`**: runs [Retron](https://github.com/RetroGigabyte/Retron) scripts — real variables, `if`/`loop`/functions, `INPUT`/`OPEN`/`READ`/`WRITE`/`LOAD`/`QUIT`, genuinely new logic beyond what `/system`/`/boot` scripts can sequence
+- **`mkali`/`rmali`/`ls-ali`**: alias any script (`.sh`/`.retro`/`.elf`, including ones on `/sd`) to run by a short name from anywhere, optionally at boot too - list or remove aliases
+- **`runelf`**: stage-1 loader for compiled Xtensa machine code from SD (fixed signature, no relocations yet) - the first step toward a real native-code ELF loader
 - **`PATH`**: `/system`-style script directories now configurable (colon-separated) in `/etc/settings/esp-nix.conf`, checked in order for a matching command
 - **`sleep <seconds>`**: pauses, interruptible by any keypress
 - **`backup -m/-l/-r#`**: backs up internal storage to `/sd/backups` as `hostname-timestamp.esp_bak`, lists backups numbered, restores by number
@@ -92,7 +94,7 @@ After booting, you'll see the shell prompt:
 
 ```
 root@esp-nix:/$ help
-ESP-Nix 0.9.2.5 - Available commands:
+ESP-Nix 1.0.2 - Available commands:
   help        - Show this help
   ls [-l] [path] - List directory (-l for permissions/size/date)
   pwd         - Print working directory
@@ -143,6 +145,10 @@ ESP-Nix 0.9.2.5 - Available commands:
   curl [-X METHOD] [-d data] <url> - Basic HTTP client
   wget <url> [-O output] - Download a URL straight to a file
   ftp get <ftp://url> [file] | ftp put <file> <ftp://url> | ftp ls <ftp://url>
+  mkali <source> <name> [-boot] - Alias a .sh/.retro/.elf (anywhere, incl. /sd) to run as <name>
+  rmali <name> - Remove an alias created by mkali
+  ls-ali - List aliases (what each runs, and whether it's set to run at boot)
+  runelf <path> [a] [b] - Run a self-contained compiled Xtensa function (stage 1, see README)
   retron <file.retro> - Run a Retron language script (variables/loops/if)
   sleep <seconds> - Pause (any key interrupts)
   hostname [-v] | hostname -s <name> - Show/set hostname (prompt + WiFi)
@@ -155,7 +161,7 @@ ESP-Nix 0.9.2.5 - Available commands:
 
 ```bash
 root@esp-nix:/$ uname
-ESP-Nix 0.9.2.5
+ESP-Nix 1.0.2
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -196,7 +202,7 @@ A declarative OS for ESP32.
 root@esp-nix:/$ uname > sysinfo.txt
 root@esp-nix:/$ echo "more info" >> sysinfo.txt
 root@esp-nix:/$ cat sysinfo.txt
-ESP-Nix 0.9.2.5
+ESP-Nix 1.0.2
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -438,7 +444,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 root@esp-nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 0.9.2.5
+  |:_/ |         OS: ESP-Nix 1.0.2
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -666,6 +672,64 @@ root@esp-nix:/$ ftp ls ftp://user:pass@192.168.1.50/remote
 - `ftp ls <ftp://url>`
 
 Credentials go in the URL (`ftp://user:pass@host/path`); omit them for `anonymous`/no password. Built on a locally-patched copy of [`ldab/ESP32_FTPClient`](https://github.com/ldab/ESP32_FTPClient) (vendored in `src/ftpclient/`, not pulled in as a library dependency) — the upstream library's own `DownloadFile()` reads a caller-supplied byte count via `readBytes()` and discards the actual number of bytes read, so it can't tell real file data from trailing garbage on a short read (and the project's own TODO list confirms download support was never finished). The vendored copy adds `DownloadFileToFile()`, which instead reads from the passive data connection until the server closes it — correct FTP semantics for `RETR` — and returns the real byte count.
+
+### mkali
+
+Aliases a script — anywhere on the filesystem, including `/sd` — so it's runnable by a short name from anywhere, the same way `/system/*.sh` scripts already are, and optionally auto-runs at boot too:
+
+```bash
+root@esp-nix:/$ mkali /sd/programs/mytool.retro mytool
+Aliased /sd/programs/mytool.retro as 'mytool'
+
+root@esp-nix:/$ mytool
+(runs the Retron script directly)
+
+root@esp-nix:/$ mkali /sd/programs/daemon.sh watcher -boot
+Aliased /sd/programs/daemon.sh as 'watcher'
+Also set to run at boot
+```
+
+`mkali <source> <name> [-boot]` — works by dropping a one-line wrapper into `/system/<name>.sh` that runs `<source>` the right way for its extension (`.sh` runs directly, `.retro` goes through `retron`, `.elf` goes through `runelf`); `-boot` drops the same wrapper into `/boot` as well, so it also runs automatically at every startup. Anything typed after `<name>` is forwarded to `<source>` via `$@`, same as any other `/system/*.sh` command.
+
+`rmali <name>` removes an alias (from both `/system` and `/boot`, if present in both). `ls-ali` lists every alias, what it actually runs, and whether it's set to run at boot:
+
+```bash
+root@esp-nix:/$ ls-ali
+mytool -> retron /sd/programs/mytool.retro $@
+watcher -> ./ /sd/programs/daemon.sh $@  [boot]
+
+root@esp-nix:/$ rmali watcher
+Removed alias 'watcher' from /system
+Removed 'watcher' from /boot
+```
+
+### runelf
+
+A first, deliberately small step toward running compiled code from SD — **not a real ELF loader yet**. It loads a flat blob of raw Xtensa machine code into executable RAM and calls it:
+
+```bash
+root@esp-nix:/$ runelf /sd/add_and_square.elf 3 4
+Result: 49
+
+root@esp-nix:/$ runelf /sd/boot_marker.elf
+Result: 42
+```
+
+`runelf <path> <a> <b>` calls the loaded code as `int(int,int)`; `runelf <path>` with no arguments calls it as `int()` instead — this second form is what makes aliasing a `.elf` to run at boot (`mkali ... -boot`) actually useful, since a boot-time invocation is never given arguments to forward.
+
+Current limitations, to be lifted as this matures on the `elf-loader` branch:
+- Only these two fixed signatures (`int(int,int)` or `int()`) — no other function shapes yet
+- No relocations, no symbol resolution against the firmware — the loaded code must be entirely self-contained (no calls to other functions, no references to global data)
+- No real ELF parsing — the file is just a raw `.text` section dump, not a linked ELF binary
+
+**Building a `.elf` file today** (until a real toolchain/build step exists): write a small, self-contained C function, compile it with the same Xtensa toolchain PlatformIO uses, and extract just its machine code:
+
+```bash
+xtensa-esp32-elf-gcc -c -O1 -mtext-section-literals -mlongcalls -o prog.o prog.c
+xtensa-esp32-elf-objcopy -O binary --only-section=.text prog.o add_and_square.elf
+```
+
+This only works because a self-contained function (only local variables, no external calls, no global data) compiles down with zero relocations against its own `.text` — copying the section verbatim and calling it directly is safe. Anything that calls another function or touches a global will need the real relocator/symbol-table work planned for the ELF loader.
 
 ### Partition Layout
 

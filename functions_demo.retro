@@ -1,0 +1,30 @@
+# Demonstrates Retron functions - defined with $"name" ... $, called
+# inline with READ "name". Functions share the caller's variables.
+# Run: retron functions_demo.retro
+
+/width = 4
+/height = 7
+
+print "Rectangle: " & [/width] & " x " & [/height]
+READ "compute_area"
+print "Area = " & [/area]
+
+READ "compute_perimeter"
+print "Perimeter = " & [/perimeter]
+
+if /area > /perimeter
+  print "Area is bigger than perimeter"
+END
+else
+  print "Perimeter is bigger than or equal to area"
+END
+
+QUIT
+
+$"compute_area"
+/area = /width * /height
+$
+
+$"compute_perimeter"
+/perimeter = /width * 2 + /height * 2
+$

@@ -1,4 +1,4 @@
-# ESP-Nix v0.9.2.5
+# ESP-Nix v1.0.2
 
 A declarative, Unix-like shell operating system for the ESP32 — built from scratch on FreeRTOS, running entirely off an I2C LCD and a serial console (with optional SD card, PS/2 keyboard, and WiFi).
 
@@ -69,6 +69,32 @@ The `nixfetch` snapshot on `web`'s file manager page rendered as an empty `<pre>
 ## Bug Fix (v0.9.1.1): backup -m failed on the filesystem root
 
 `backup -m` compresses internal storage root (`/`) directly, but `Archiver::compressZip()` computes a wrapping directory name from the last path segment - for `/` itself, that's an empty string, producing an invalid zip entry name (`/`) that miniz rejects with "Failed to add directory entry: /". Fixed by special-casing root: instead of wrapping everything in a (nonexistent) top-level folder, `/`'s direct children are added to the zip individually, with no wrapping folder at all - which is also the more useful behavior for a backup, since restoring extracts straight back onto `/` without an extra nested layer.
+
+## New in v1.0.2: `runelf` supports zero-argument functions - makes `.elf`s at boot actually useful
+
+`runelf` required exactly two arguments (`int(int,int)`), so a `.elf` aliased with `mkali ... -boot` would always fail at boot time - a boot-time invocation never has arguments to forward. `runelf <path>` (no args) now calls the loaded code as `int()` instead, so a self-contained no-argument function is a genuinely useful thing to run at boot. `runelf <path> <a> <b>` still works exactly as before for two-argument functions.
+
+## Bug Fix (v1.0.1): `runelf` crashed with a LoadStoreError
+
+`runelf` crashed on real hardware every time: `MALLOC_CAP_EXEC` memory (IRAM) on the ESP32 only supports 32-bit-aligned word accesses - a byte-wise file read directly into that region (as `runelf` originally did) faults immediately with a `LoadStoreError`. Fixed by reading the file into a normal byte-addressable staging buffer first, then copying it into the executable region one 32-bit word at a time (padding the tail to a word boundary).
+
+## New in v1.0: `runelf` - the first step toward running compiled code from SD
+
+`runelf <path> <a> <b>` loads a flat blob of raw Xtensa machine code from SD into executable RAM (via `heap_caps_malloc(MALLOC_CAP_EXEC)`) and calls it with a fixed `int(int,int)` signature. This is deliberately the smallest possible slice of "run compiled code from SD" - no ELF parsing, no relocations, no symbol resolution against the firmware yet. It works today because a genuinely self-contained C function (no calls to other functions, no global data) compiles down to zero relocations against its own `.text` section, so copying that section verbatim into RAM and calling it directly is safe. Building a `.elf` file today means compiling a self-contained function with the Xtensa toolchain and extracting just its `.text` with `objcopy` - see the README's `runelf` section for the exact recipe. The real relocator/symbol-table work needed for arbitrary compiled programs is tracked on the `elf-loader` branch.
+
+## New in v1.0: `mkali`/`rmali`/`ls-ali` - alias, remove, and list SD-hosted programs
+
+`mkali <source> <name> [-boot]` now also recognizes `.elf` files (routing through `runelf`), alongside the existing `.sh`/`.retro` support. `rmali <name>` removes an alias from both `/system` and `/boot`. `ls-ali` lists every alias, what it actually runs, and whether it's set to run at boot.
+
+## Bug Fix (v0.9.5.1): Retron addition/subtraction of two variables produced garbage
+
+`/a + /b` (and `/a - /b`) evaluated to `nan` or otherwise wrong results whenever both operands were variables. The expression evaluator's division-operator detection couldn't tell a real `/` operator apart from a variable's own `/` prefix once more than one variable appeared in an expression - it only special-cased a slash at position 0, so `/a + /b`'s second slash (from `/b`) got misread as a division operator splitting the expression in the wrong place entirely. This affected the shipped `calculator.retro` example's own "a + b" line. Fixed by replacing the position-based special case with `findDivisionOp()`, which looks at the nearest non-space character before each `/` - a real division operator follows a completed value (a digit, letter, or `)`), while a variable's own slash follows the start of the expression or another operator.
+
+Separately, `^` (power) is parsed before `*`/`+`/`-` and greedily consumes the rest of the expression as its exponent/base - this is a real precedence limitation, not something fixed here. Expressions mixing `^` with other operators (e.g. `/pi * /r ^ 2`) don't evaluate as expected; keep to one operator type per expression and store intermediate results in their own variables instead.
+
+## New in v0.9.5: `mkali` - alias scripts to run by name, anywhere, optionally at boot
+
+`mkali <source> <name> [-boot]` aliases any script - including ones living on `/sd` - so it runs by a short name from anywhere, the same way `/system/*.sh` scripts already do. It works by dropping a one-line wrapper into `/system/<name>.sh` that runs `<source>` the right way for its extension (`.sh` directly, `.retro` through `retron`); `-boot` drops the same wrapper into `/boot` too, so it also runs automatically at every startup. `$@` forwarding works exactly like any other `/system/*.sh` command.
 
 ## Bug Fix (v0.9.2.5): `ftp get` crashed with a stack overflow
 

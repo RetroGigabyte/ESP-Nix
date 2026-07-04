@@ -137,6 +137,28 @@ private:
     }
   }
 
+  // A '/' is ambiguous in this language: it's both the division operator
+  // and every variable's prefix (e.g. "/a"). Finds the position of a
+  // genuine division operator, distinguishing it from a variable's
+  // leading slash by looking at the nearest non-space character before
+  // it - a real division op follows a completed value (alphanumeric or
+  // ')'), while a variable's own slash follows the start of the
+  // expression or another operator. Returns -1 if there's no real
+  // division operator (every slash found is a variable prefix).
+  int findDivisionOp(const String& e) {
+    for (int i = 0; i < (int)e.length(); i++) {
+      if (e[i] != '/') continue;
+      int j = i - 1;
+      while (j >= 0 && e[j] == ' ') j--;
+      if (j < 0) continue;  // start of expression - variable prefix
+      char prev = e[j];
+      if (isAlphaNumeric(prev) || prev == ')') return i;
+      // prev is an operator or '(' - this slash starts a variable, not
+      // a division; keep scanning for a real one.
+    }
+    return -1;
+  }
+
   float evalExpression(String e) {
     e.trim();
     if (e.length() == 0) return 0;
@@ -156,18 +178,21 @@ private:
       return pow(base, exp);
     }
 
-    for (char op : {'*', '/'}) {
-      int pos = e.indexOf(op);
+    {
+      int pos = e.indexOf('*');
       if (pos >= 0) {
-        if (op == '/' && pos == 0) {
-          pos = e.indexOf('/', 1);
-          if (pos < 0) continue;
-        }
         String left = e.substring(0, pos);
         String right = e.substring(pos + 1);
-        float lVal = evalExpression(left);
-        float rVal = evalExpression(right);
-        return (op == '*') ? lVal * rVal : lVal / rVal;
+        return evalExpression(left) * evalExpression(right);
+      }
+    }
+
+    {
+      int pos = findDivisionOp(e);
+      if (pos >= 0) {
+        String left = e.substring(0, pos);
+        String right = e.substring(pos + 1);
+        return evalExpression(left) / evalExpression(right);
       }
     }
 

@@ -1,0 +1,17 @@
+# Demonstrates Retron's file commands: WRITE appends a line, READ pulls
+# a specific line back out by number, OPEN dumps a whole file. Filenames
+# in these commands are always literal (not variable-substituted), and
+# are resolved relative to the directory this script itself lives in.
+# Run: retron files_demo.retro
+
+WRITE "First entry" notes.txt
+WRITE "Second entry" notes.txt
+WRITE "Third entry" notes.txt
+
+print "Wrote 3 lines to notes.txt"
+
+print "Line 2 was:"
+READ notes.txt 2
+
+print "Full file:"
+OPEN notes.txt

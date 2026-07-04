@@ -17,6 +17,7 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include "ftpclient/ESP32_FTPClient.h"
+#include "esp_heap_caps.h"
 
 class Commands {
 private:
@@ -67,7 +68,7 @@ public:
       "grep", "head", "tail", "mkdir", "clear", "edit", "env", "uname",
       "whoami", "date", "df", "free", "nixos-rebuild", "webserver", "update",
       "find", "wc", "du", "reboot", "ntp", "extract", "compress", "test", "settz", "nixfetch", "loop",
-      "wifi", "ip", "ping", "curl", "wget", "ftp", "retron", "sleep", "hostname", "backup", "exit"
+      "wifi", "ip", "ping", "curl", "wget", "ftp", "mkali", "rmali", "ls-ali", "runelf", "retron", "sleep", "hostname", "backup", "exit"
     };
     return names;
   }
@@ -152,6 +153,10 @@ private:
     if (cmd == "curl") return cmdCurl(args);
     if (cmd == "wget") return cmdWget(args);
     if (cmd == "ftp") return cmdFtp(args);
+    if (cmd == "mkali") return cmdMkali(args);
+    if (cmd == "rmali") return cmdRmali(args);
+    if (cmd == "ls-ali") return cmdLsAli(args);
+    if (cmd == "runelf") return cmdRunelf(args);
     if (cmd == "retron") return cmdRetron(args);
     if (cmd == "sleep") return cmdSleep(args);
     if (cmd == "hostname") return cmdHostname(args);
@@ -833,6 +838,214 @@ private:
     }
   }
 
+  // mkali <source> <name> [-boot] - aliases a program (anywhere on the
+  // filesystem, including /sd) so it's runnable by <name> from anywhere,
+  // the same way /system/*.sh scripts already are. Works by dropping a
+  // tiny wrapper script into /system, whose one line picks the right way
+  // to run <source> based on its extension (.sh runs directly, .retro
+  // goes through the retron interpreter, .elf goes through runelf).
+  // With -boot, the same wrapper
+  // is also dropped into /boot so it runs automatically at every startup.
+  bool cmdMkali(const std::vector<String>& args) {
+    if (args.size() < 3) {
+      term.println("Usage: mkali <source> <name> [-boot]");
+      return true;
+    }
+
+    String source = fs.resolvePath(args[1]);
+    String name = args[2];
+    bool atBoot = false;
+    for (size_t i = 3; i < args.size(); i++) {
+      if (args[i] == "-boot") atBoot = true;
+    }
+
+    if (!fs.exists(source)) {
+      term.println("mkali: no such file: " + source);
+      return true;
+    }
+
+    String wrapper;
+    if (source.endsWith(".sh")) {
+      wrapper = "./" + source + " $@\n";
+    } else if (source.endsWith(".retro")) {
+      wrapper = "retron " + source + " $@\n";
+    } else if (source.endsWith(".elf")) {
+      wrapper = "runelf " + source + " $@\n";
+    } else {
+      term.println("mkali: don't know how to run this file type: " + source);
+      return true;
+    }
+
+    if (!fs.exists("/system")) fs.createDir("/system");
+    fs.writeFile("/system/" + name + ".sh", wrapper);
+    term.println("Aliased " + source + " as '" + name + "'");
+
+    if (atBoot) {
+      if (!fs.exists("/boot")) fs.createDir("/boot");
+      fs.writeFile("/boot/" + name + ".sh", wrapper);
+      term.println("Also set to run at boot");
+    }
+
+    return true;
+  }
+
+  // rmali <name> - removes an alias created by mkali, from /system (and
+  // /boot too, if it was set to run there).
+  bool cmdRmali(const std::vector<String>& args) {
+    if (args.size() < 2) {
+      term.println("Usage: rmali <name>");
+      return true;
+    }
+
+    String name = args[1];
+    bool removedAny = false;
+
+    if (fs.exists("/system/" + name + ".sh")) {
+      fs.deleteFile("/system/" + name + ".sh");
+      term.println("Removed alias '" + name + "' from /system");
+      removedAny = true;
+    }
+
+    if (fs.exists("/boot/" + name + ".sh")) {
+      fs.deleteFile("/boot/" + name + ".sh");
+      term.println("Removed '" + name + "' from /boot");
+      removedAny = true;
+    }
+
+    if (!removedAny) {
+      term.println("rmali: no alias named '" + name + "'");
+    }
+
+    return true;
+  }
+
+  // ls-ali - lists every /system/*.sh command (mkali-created or not - the
+  // wrapper format is indistinguishable from any other hand-written
+  // one-liner script, so all of them show up here), along with what it
+  // actually runs and whether it's also set to run at boot.
+  bool cmdLsAli(const std::vector<String>& args) {
+    if (!fs.exists("/system") || !fs.isDir("/system")) {
+      term.println("No aliases (/system doesn't exist)");
+      return true;
+    }
+
+    std::vector<String> names = fs.listDir("/system");
+    std::sort(names.begin(), names.end());
+
+    bool any = false;
+    for (const auto& fname : names) {
+      if (!fname.endsWith(".sh")) continue;
+      any = true;
+
+      String name = fname.substring(0, fname.length() - 3);
+      String content = fs.readFile("/system/" + fname);
+      content.trim();
+
+      bool atBoot = fs.exists("/boot/" + fname);
+      term.println(name + " -> " + content + (atBoot ? "  [boot]" : ""));
+    }
+
+    if (!any) {
+      term.println("No aliases");
+    }
+
+    return true;
+  }
+
+  // runelf <path> [a] [b] - stage-1 native-code loader. NOT a real ELF
+  // loader yet: it loads a flat, position-independent blob of raw Xtensa
+  // machine code (produced on a PC by compiling a single self-contained
+  // function with -mtext-section-literals -mlongcalls and then extracting
+  // just its .text section with objcopy - see goals.md/README for the
+  // exact recipe), copies it into executable RAM, and calls it. No
+  // relocations, no symbol resolution against the firmware, no calls to
+  // other functions or globals are supported - the loaded code must be
+  // entirely self-contained. This is deliberately the smallest possible
+  // slice of "run compiled code from SD" to prove the loading mechanism
+  // (executable RAM allocation via heap_caps_malloc, copying, calling
+  // through a function pointer) before building a real relocator/symbol
+  // table on top of it.
+  //
+  // Signature depends on how many args are given: with both <a> and <b>,
+  // calls int(int,int); with neither, calls int() - this second form is
+  // what makes running an .elf at boot (via "mkali ... -boot") actually
+  // useful, since a boot-time alias is invoked with no arguments at all.
+  bool cmdRunelf(const std::vector<String>& args) {
+    if (args.size() < 2) {
+      term.println("Usage: runelf <path> [a] [b]");
+      term.println("With a and b: calls the loaded code as int(int,int).");
+      term.println("With neither: calls it as int().");
+      return true;
+    }
+
+    String path = fs.resolvePath(args[1]);
+    bool hasArgs = args.size() >= 4;
+    int a = hasArgs ? args[2].toInt() : 0;
+    int b = hasArgs ? args[3].toInt() : 0;
+
+    if (!fs.exists(path)) {
+      term.println("runelf: no such file: " + path);
+      return true;
+    }
+
+    File inFile = fs.openRaw(path, "r");
+    if (!inFile) {
+      term.println("runelf: could not open " + path);
+      return true;
+    }
+    size_t len = inFile.size();
+    if (len == 0) {
+      term.println("runelf: empty file: " + path);
+      inFile.close();
+      return true;
+    }
+
+    // IRAM (MALLOC_CAP_EXEC memory) only supports 32-bit-aligned word
+    // accesses on the ESP32 - a byte-wise read/memcpy into it faults with
+    // a LoadStoreError. So the file is read into a normal byte-addressable
+    // buffer first, then copied into the exec region one 32-bit word at a
+    // time (padding the tail up to a word boundary with zero bytes).
+    size_t wordLen = (len + 3) & ~((size_t)3);
+
+    uint8_t* stagingBuf = (uint8_t*)calloc(1, wordLen);
+    if (!stagingBuf) {
+      term.println("runelf: could not allocate staging buffer");
+      inFile.close();
+      return true;
+    }
+    inFile.read(stagingBuf, len);
+    inFile.close();
+
+    void* execMem = heap_caps_malloc(wordLen, MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
+    if (!execMem) {
+      term.println("runelf: could not allocate " + String(wordLen) + " bytes of executable RAM");
+      free(stagingBuf);
+      return true;
+    }
+
+    const uint32_t* src = (const uint32_t*)stagingBuf;
+    uint32_t* dst = (uint32_t*)execMem;
+    for (size_t i = 0; i < wordLen / 4; i++) {
+      dst[i] = src[i];
+    }
+    free(stagingBuf);
+
+    int result;
+    if (hasArgs) {
+      typedef int (*EntryFn2)(int, int);
+      EntryFn2 entry = (EntryFn2)execMem;
+      result = entry(a, b);
+    } else {
+      typedef int (*EntryFn0)();
+      EntryFn0 entry = (EntryFn0)execMem;
+      result = entry();
+    }
+
+    term.println("Result: " + String(result));
+    heap_caps_free(execMem);
+    return true;
+  }
+
   // Runs a .retro script (RetroGigabyte/Retron language), ported from
   // that project's reference interpreter. DRAW errors clearly rather
   // than silently no-op'ing, since composite video output isn't wired up
@@ -1266,7 +1479,7 @@ private:
   }
 
   bool cmdHelp(const std::vector<String>& args) {
-    out("ESP-Nix 0.9.2.5 - Available commands:");
+    out("ESP-Nix 1.0.2 - Available commands:");
     out("  help        - Show this help");
     out("  ls [-l] [path] - List directory (-l for permissions/size/date)");
     out("  pwd         - Print working directory");
@@ -1317,6 +1530,10 @@ private:
     out("  curl [-X METHOD] [-d data] <url> - Basic HTTP client");
     out("  wget <url> [-O output] - Download a URL straight to a file");
     out("  ftp get <ftp://url> [file] | ftp put <file> <ftp://url> | ftp ls <ftp://url>");
+    out("  mkali <source> <name> [-boot] - Alias a .sh/.retro/.elf (anywhere, incl. /sd) to run as <name>");
+    out("  rmali <name> - Remove an alias created by mkali");
+    out("  ls-ali - List aliases (what each runs, and whether it's set to run at boot)");
+    out("  runelf <path> [a] [b] - Run a self-contained compiled Xtensa function (stage 1, see README)");
     out("  retron <file.retro> - Run a Retron language script (variables/loops/if)");
     out("  sleep <seconds> - Pause (any key interrupts)");
     out("  hostname [-v] | hostname -s <name> - Show/set hostname (prompt + WiFi)");
@@ -1414,7 +1631,7 @@ private:
   // info as readable pseudo-files rather than only via commands.
   bool getProcContent(const String& path, String& content) {
     if (path == "/proc/version") {
-      content = "ESP-Nix version 0.9.2.5 (FreeRTOS) Xtensa\n";
+      content = "ESP-Nix version 1.0.2 (FreeRTOS) Xtensa\n";
       return true;
     }
     if (path == "/proc/uptime") {
@@ -1580,7 +1797,7 @@ private:
   }
 
   bool cmdUname(const std::vector<String>& args) {
-    out("ESP-Nix 0.9.2.5");
+    out("ESP-Nix 1.0.2");
     out("System: ESP32 WROOM32E");
     out("Arch: Xtensa");
     out("Kernel: FreeRTOS");
@@ -1632,7 +1849,7 @@ private:
     std::vector<String> info;
     info.push_back("root@esp-nix");
     info.push_back("------------");
-    info.push_back("OS: ESP-Nix 0.9.2.5");
+    info.push_back("OS: ESP-Nix 1.0.2");
     info.push_back("Host: ESP32 WROOM32E");
     info.push_back("Kernel: FreeRTOS");
     info.push_back("Uptime: " + formatUptime(millis() / 1000));

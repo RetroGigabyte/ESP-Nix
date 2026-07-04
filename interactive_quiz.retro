@@ -1,0 +1,19 @@
+# Demonstrates INPUT - reads a line of text from Serial/PS2 into a
+# string variable (as opposed to /var, which only ever holds numbers).
+# Run: retron interactive_quiz.retro
+
+print "What's your name?"
+INPUT name
+
+print "Hello, " & /name & "!"
+
+print "Pick a number of stars to print (1-10):"
+INPUT count
+
+/n = /count
+
+loop /n
+  print "*"
+END
+
+print "Thanks for playing, " & /name & "!"

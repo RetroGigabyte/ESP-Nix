@@ -1,0 +1,14 @@
+print "Hello from Retron!"
+
+/count = 0
+loop 5
+  /count = /count + 1
+  print "count is " & [/count]
+END
+
+if /count = 5
+  print "loop finished correctly"
+END
+else
+  print "something went wrong"
+END

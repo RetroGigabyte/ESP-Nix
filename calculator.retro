@@ -1,0 +1,30 @@
+# Simple calculator - edit /a and /b below, then run: retron calculator.retro
+/a = 12
+/b = 5
+
+print "a = " & [/a] & ", b = " & [/b]
+
+/sum = /a + /b
+print "a + b = " & [/sum]
+
+/diff = /a - /b
+print "a - b = " & [/diff]
+
+/prod = /a * /b
+print "a * b = " & [/prod]
+
+/quot = /a / /b
+print "a / b = " & [/quot]
+
+/pw = /a ^ 2
+print "a ^ 2 = " & [/pw]
+
+/rt = /a ^r 2
+print "sqrt(a) = " & [/rt]
+
+if /a > /b
+  print "a is bigger"
+END
+else
+  print "b is bigger or equal"
+END

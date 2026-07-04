@@ -1,0 +1,20 @@
+# Prints a multiplication table for /size x /size, using nested loops.
+# Run: retron multiplication_table.retro
+
+/size = 5
+/row = 0
+
+loop /size
+  /row = /row + 1
+  /col = 0
+
+  loop /size
+    /col = /col + 1
+    /product = /row * /col
+    print [/row] & " x " & [/col] & " = " & [/product]
+  END
+
+  print "---"
+END
+
+print "Done."

@@ -1,0 +1,26 @@
+# Right-triangle hypotenuse and circle area, exercising ^ (power) and
+# ^r (root) - e.g. /x ^r 2 is the square root of /x.
+#
+# NOTE: this interpreter has no real operator precedence - ^ especially
+# greedily consumes the rest of its expression as the exponent, so each
+# step here keeps to one operator type and stores the result in its own
+# variable, rather than writing one big combined expression.
+# Run: retron geometry.retro
+
+/legA = 3
+/legB = 4
+
+/aSq = /legA ^ 2
+/bSq = /legB ^ 2
+/sumSquares = /aSq + /bSq
+/hyp = /sumSquares ^r 2
+
+print "Right triangle with legs " & [/legA] & " and " & [/legB]
+print "Hypotenuse = " & [/hyp]
+
+/radius = 5
+/pi = 3.14159
+/radiusSq = /radius ^ 2
+/area = /pi * /radiusSq
+
+print "Circle with radius " & [/radius] & " has area " & [/area]
