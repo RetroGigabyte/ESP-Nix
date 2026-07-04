@@ -329,7 +329,19 @@ private:
       term.println("WiFi disconnected.");
       return true;
     }
-    term.println("Usage: wifi status | wifi connect [ssid] [password] | wifi disconnect");
+    if (args[1] == "toggle") {
+      if (WiFi.status() == WL_CONNECTED) {
+        term.println("WiFi was on - disconnecting...");
+        WiFi.disconnect(true);
+        WiFi.mode(WIFI_OFF);
+        term.println("WiFi disconnected.");
+      } else {
+        term.println("WiFi was off - connecting...");
+        wifiConnectPersistent(args);
+      }
+      return true;
+    }
+    term.println("Usage: wifi status | wifi connect [ssid] [password] | wifi disconnect | wifi toggle");
     return true;
   }
 
@@ -896,7 +908,7 @@ private:
   }
 
   bool cmdHelp(const std::vector<String>& args) {
-    out("ESP-Nix 0.8.0 - Available commands:");
+    out("ESP-Nix 0.8.1 - Available commands:");
     out("  help        - Show this help");
     out("  ls [-l] [path] - List directory (-l for permissions/size/date)");
     out("  pwd         - Print working directory");
@@ -941,7 +953,7 @@ private:
     out("  settz <name>  - Set TZ_OFFSET by timezone name (settz -list)");
     out("  nixfetch      - System summary with a logo (edit /etc/settings/logo.txt)");
     out("  loop <count|inf> [-i secs] <cmd...> - Repeat a command (any key stops it)");
-    out("  wifi status|connect|disconnect - Persistent WiFi connection (stays up between commands)");
+    out("  wifi status|connect|disconnect|toggle - Persistent WiFi connection (stays up between commands)");
     out("  ip            - Show current IP address");
     out("  ping <host>   - Ping a host (requires 'wifi connect' first)");
     out("  curl [-X METHOD] [-d data] <url> - Basic HTTP client");
@@ -1038,7 +1050,7 @@ private:
   // info as readable pseudo-files rather than only via commands.
   bool getProcContent(const String& path, String& content) {
     if (path == "/proc/version") {
-      content = "ESP-Nix version 0.8.0 (FreeRTOS) Xtensa\n";
+      content = "ESP-Nix version 0.8.1 (FreeRTOS) Xtensa\n";
       return true;
     }
     if (path == "/proc/uptime") {
@@ -1204,7 +1216,7 @@ private:
   }
 
   bool cmdUname(const std::vector<String>& args) {
-    out("ESP-Nix 0.8.0");
+    out("ESP-Nix 0.8.1");
     out("System: ESP32 WROOM32E");
     out("Arch: Xtensa");
     out("Kernel: FreeRTOS");
@@ -1256,7 +1268,7 @@ private:
     std::vector<String> info;
     info.push_back("root@esp-nix");
     info.push_back("------------");
-    info.push_back("OS: ESP-Nix 0.8.0");
+    info.push_back("OS: ESP-Nix 0.8.1");
     info.push_back("Host: ESP32 WROOM32E");
     info.push_back("Kernel: FreeRTOS");
     info.push_back("Uptime: " + formatUptime(millis() / 1000));

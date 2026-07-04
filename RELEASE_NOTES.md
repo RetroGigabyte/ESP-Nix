@@ -1,4 +1,4 @@
-# ESP-Nix v0.8.0
+# ESP-Nix v0.8.1
 
 A declarative, Unix-like shell operating system for the ESP32 — built from scratch on FreeRTOS, running entirely off an I2C LCD and a serial console (with optional SD card, PS/2 keyboard, and WiFi).
 
@@ -24,7 +24,7 @@ A declarative, Unix-like shell operating system for the ESP32 — built from scr
 - `web` — WiFi file server (drag-and-drop upload/download) **and** a browser-based terminal, reachable from any phone or computer, running through the exact same shell processing as Serial/PS2
 - `web -join`/`-list` — scan and join real WPA2 networks
 - `ntp`/`settz` — WiFi time sync with named-timezone lookup and automatic US DST handling
-- `wifi connect`/`disconnect`/`status`, `ip`, `ping` — a persistent WiFi connection independent of `web`'s connect-then-disconnect lifecycle, so the shell can check status, IP, and host reachability at will
+- `wifi connect`/`disconnect`/`status`/`toggle`, `ip`, `ping` — a persistent WiFi connection independent of `web`'s connect-then-disconnect lifecycle, so the shell can check status, IP, and host reachability at will
 - `curl [-X METHOD] [-d data] <url>` — basic HTTP/HTTPS client (HTTPS via `WiFiClientSecure::setInsecure()`, no certificate validation)
 - OTA updates via `update`, with pre-flight validation (size and firmware-header checks) before touching flash
 
@@ -37,7 +37,7 @@ A declarative, Unix-like shell operating system for the ESP32 — built from scr
 - `nixfetch` — a neofetch-style system summary with a customizable ASCII logo
 - `loop <count|inf> [-i seconds] <command...>` — repeats a command, since the script engine has no real loop construct; any keypress stops it early
 
-## Partition Layout Change (v0.8.0)
+## Partition Layout Change (v0.8.1)
 
 Switched from the default two 1.25MB OTA slots to a single 3MB app partition (`huge_app.csv`) - down to ~74KB flash headroom after HTTPS support, now back up to ~1.87MB. Trade-off: no more automatic OTA rollback slot (a passing-but-broken update now needs a USB reflash to recover, instead of an automatic bootloader fallback); LittleFS also shrinks from 1408KB to 896KB. `update`/OTA itself keeps working normally for all routine updates going forward - this only affects that one failure mode, and only this one migration needs USB (it changes the partition table itself, which OTA can never touch). Full details in the README's "Partition Layout" section.
 

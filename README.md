@@ -85,7 +85,7 @@ After booting, you'll see the shell prompt:
 
 ```
 nix:/$ help
-ESP-Nix 0.8.0 - Available commands:
+ESP-Nix 0.8.1 - Available commands:
   help        - Show this help
   ls [path]   - List directory
   pwd         - Print working directory
@@ -117,7 +117,7 @@ ESP-Nix 0.8.0 - Available commands:
 
 ```bash
 nix:/$ uname
-ESP-Nix 0.8.0
+ESP-Nix 0.8.1
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -158,7 +158,7 @@ A declarative OS for ESP32.
 nix:/$ uname > sysinfo.txt
 nix:/$ echo "more info" >> sysinfo.txt
 nix:/$ cat sysinfo.txt
-ESP-Nix 0.8.0
+ESP-Nix 0.8.1
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -388,7 +388,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 0.8.0
+  |:_/ |         OS: ESP-Nix 0.8.1
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -448,6 +448,18 @@ WiFi disconnected.
 ```
 
 `wifi connect` with no arguments reuses the saved network from `web -join` (`WIFI_SSID`/`WIFI_PASS`); `wifi connect <ssid> [password]` joins a specific network directly without saving it. Starting `web` or `web -join` while a persistent connection is active will reconfigure the radio for that operation instead — last WiFi command wins.
+
+`wifi toggle` flips between the two: connects (using the saved network) if currently off, disconnects if currently on:
+
+```bash
+nix:/$ wifi toggle
+WiFi was off - connecting...
+Joined MyHomeNetwork - IP: 192.168.1.42
+
+nix:/$ wifi toggle
+WiFi was on - disconnecting...
+WiFi disconnected.
+```
 
 ### curl
 
