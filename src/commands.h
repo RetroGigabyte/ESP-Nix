@@ -13,6 +13,8 @@
 #include "otaupdate.h"
 #include "archive.h"
 #include <ESP32Ping.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 
 class Commands {
 private:
@@ -63,7 +65,7 @@ public:
       "grep", "head", "tail", "mkdir", "clear", "edit", "env", "uname",
       "whoami", "date", "df", "free", "nixos-rebuild", "webserver", "update",
       "find", "wc", "du", "reboot", "ntp", "extract", "compress", "test", "settz", "nixfetch", "loop",
-      "wifi", "ip", "ping", "exit"
+      "wifi", "ip", "ping", "curl", "exit"
     };
     return names;
   }
@@ -145,6 +147,7 @@ private:
     if (cmd == "wifi") return cmdWifi(args);
     if (cmd == "ip") return cmdIp(args);
     if (cmd == "ping") return cmdPing(args);
+    if (cmd == "curl") return cmdCurl(args);
     if (cmd == "exit") return cmdExit(args);
 
     return tryRunSystemScript(cmd, args);
@@ -405,6 +408,79 @@ private:
     } else {
       out("No reply from " + host);
     }
+    return true;
+  }
+
+  // curl [-X METHOD] [-d data] <url> - basic HTTP client. HTTPS uses
+  // WiFiClientSecure::setInsecure() (no certificate validation) since
+  // there's no trust store on this device - fine for hobby use, not for
+  // anything security-sensitive.
+  bool cmdCurl(const std::vector<String>& args) {
+    if (args.size() < 2) {
+      term.println("Usage: curl [-X METHOD] [-d data] <url>");
+      return true;
+    }
+    if (WiFi.status() != WL_CONNECTED) {
+      term.println("WiFi is off (run 'wifi connect' first)");
+      return true;
+    }
+
+    String method = "GET";
+    String data = "";
+    String url = "";
+
+    for (size_t i = 1; i < args.size(); i++) {
+      if (args[i] == "-X" && i + 1 < args.size()) {
+        method = args[++i];
+        method.toUpperCase();
+      } else if (args[i] == "-d" && i + 1 < args.size()) {
+        data = args[++i];
+        if (method == "GET") method = "POST";
+      } else {
+        url = args[i];
+      }
+    }
+
+    if (url.length() == 0) {
+      term.println("Usage: curl [-X METHOD] [-d data] <url>");
+      return true;
+    }
+
+    HTTPClient http;
+    WiFiClientSecure secureClient;
+
+    bool began;
+    if (url.startsWith("https://")) {
+      secureClient.setInsecure();
+      began = http.begin(secureClient, url);
+    } else {
+      began = http.begin(url);
+    }
+
+    if (!began) {
+      term.println("curl: could not parse URL: " + url);
+      return true;
+    }
+
+    int statusCode;
+    if (method == "POST") {
+      http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+      statusCode = http.POST(data);
+    } else if (method == "PUT") {
+      statusCode = http.PUT(data);
+    } else if (method == "DELETE") {
+      statusCode = http.sendRequest("DELETE");
+    } else {
+      statusCode = http.GET();
+    }
+
+    if (statusCode > 0) {
+      out(http.getString());
+    } else {
+      term.println("curl: request failed: " + http.errorToString(statusCode));
+    }
+
+    http.end();
     return true;
   }
 
@@ -820,7 +896,7 @@ private:
   }
 
   bool cmdHelp(const std::vector<String>& args) {
-    out("ESP-Nix 0.7.1 - Available commands:");
+    out("ESP-Nix 0.7.2 - Available commands:");
     out("  help        - Show this help");
     out("  ls [-l] [path] - List directory (-l for permissions/size/date)");
     out("  pwd         - Print working directory");
@@ -868,6 +944,7 @@ private:
     out("  wifi status|connect|disconnect - Persistent WiFi connection (stays up between commands)");
     out("  ip            - Show current IP address");
     out("  ping <host>   - Ping a host (requires 'wifi connect' first)");
+    out("  curl [-X METHOD] [-d data] <url> - Basic HTTP client");
     out("  cat /proc/{version,uptime,meminfo,cpuinfo} - Virtual system info");
     out("  /system/*.sh files run anywhere by name (no ./ or .sh)");
     return true;
@@ -961,7 +1038,7 @@ private:
   // info as readable pseudo-files rather than only via commands.
   bool getProcContent(const String& path, String& content) {
     if (path == "/proc/version") {
-      content = "ESP-Nix version 0.7.1 (FreeRTOS) Xtensa\n";
+      content = "ESP-Nix version 0.7.2 (FreeRTOS) Xtensa\n";
       return true;
     }
     if (path == "/proc/uptime") {
@@ -1127,7 +1204,7 @@ private:
   }
 
   bool cmdUname(const std::vector<String>& args) {
-    out("ESP-Nix 0.7.1");
+    out("ESP-Nix 0.7.2");
     out("System: ESP32 WROOM32E");
     out("Arch: Xtensa");
     out("Kernel: FreeRTOS");
@@ -1179,7 +1256,7 @@ private:
     std::vector<String> info;
     info.push_back("root@esp-nix");
     info.push_back("------------");
-    info.push_back("OS: ESP-Nix 0.7.1");
+    info.push_back("OS: ESP-Nix 0.7.2");
     info.push_back("Host: ESP32 WROOM32E");
     info.push_back("Kernel: FreeRTOS");
     info.push_back("Uptime: " + formatUptime(millis() / 1000));

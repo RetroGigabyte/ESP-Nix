@@ -30,6 +30,7 @@ A minimal declarative operating system for ESP32 with a Unix-like shell interfac
 - **`nixfetch`**: a neofetch-style system summary — logo plus live stats (uptime, memory, disk, CPU) side by side, logo customizable via `/etc/settings/logo.txt`
 - **`loop`**: repeats a command a fixed number of times or indefinitely, since the script engine has no real loop construct
 - **`wifi`/`ip`/`ping`**: a persistent WiFi connection (`wifi connect`) that stays up in the background, plus status/IP lookup and host reachability checks
+- **`curl`**: basic HTTP/HTTPS client for scripts and quick API checks
 
 ## Hardware
 
@@ -84,7 +85,7 @@ After booting, you'll see the shell prompt:
 
 ```
 nix:/$ help
-ESP-Nix 0.7.1 - Available commands:
+ESP-Nix 0.7.2 - Available commands:
   help        - Show this help
   ls [path]   - List directory
   pwd         - Print working directory
@@ -116,7 +117,7 @@ ESP-Nix 0.7.1 - Available commands:
 
 ```bash
 nix:/$ uname
-ESP-Nix 0.7.1
+ESP-Nix 0.7.2
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -157,7 +158,7 @@ A declarative OS for ESP32.
 nix:/$ uname > sysinfo.txt
 nix:/$ echo "more info" >> sysinfo.txt
 nix:/$ cat sysinfo.txt
-ESP-Nix 0.7.1
+ESP-Nix 0.7.2
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -387,7 +388,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 0.7.1
+  |:_/ |         OS: ESP-Nix 0.7.2
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -447,6 +448,23 @@ WiFi disconnected.
 ```
 
 `wifi connect` with no arguments reuses the saved network from `web -join` (`WIFI_SSID`/`WIFI_PASS`); `wifi connect <ssid> [password]` joins a specific network directly without saving it. Starting `web` or `web -join` while a persistent connection is active will reconfigure the radio for that operation instead — last WiFi command wins.
+
+### curl
+
+A basic HTTP client, using the ESP32 Arduino core's built-in `HTTPClient`/`WiFiClientSecure` (no extra library needed):
+
+```bash
+nix:/$ wifi connect
+nix:/$ curl http://api.example.com/status
+{"status":"ok"}
+
+nix:/$ curl -X POST -d "name=test" https://api.example.com/echo
+{"received":{"name":"test"}}
+```
+
+`curl [-X METHOD] [-d data] <url>` — defaults to `GET`; `-d` implies `POST` if no `-X` is given, matching real `curl`'s behavior. Needs `wifi connect` run first (or an active `web`/`ntp` session).
+
+**HTTPS doesn't validate certificates** (`WiFiClientSecure::setInsecure()`) — there's no certificate trust store on this device, so any HTTPS server is accepted without verifying its identity. Fine for hobby use and APIs you already trust; don't rely on it for anything security-sensitive. This also costs real flash: pulling in the TLS stack for HTTPS support added roughly 140KB to the firmware image (see version history if you need to check current headroom).
 
 ### WiFi File Server + Browser Terminal
 
