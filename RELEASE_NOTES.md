@@ -1,6 +1,8 @@
-# ESP-Nix v0.6.9
+# ESP-Nix v0.7.0
 
 A declarative, Unix-like shell operating system for the ESP32 — built from scratch on FreeRTOS, running entirely off an I2C LCD and a serial console (with optional SD card, PS/2 keyboard, and WiFi).
+
+> **AI Disclaimer:** This project was developed with the assistance of Claude AI. I believe AI-written code should be open source to benefit everyone and maintain transparency.
 
 ## Shell
 - Full command set: `ls` (with `-l`), `cd`, `cat`, `cp`/`mv` (recursive, glob-aware, directory-destination-aware), `rm -r`, `grep`, `head`, `tail`, `find`, `wc`, `du`, `mkdir`, `touch`, `echo`, and more
@@ -27,6 +29,7 @@ A declarative, Unix-like shell operating system for the ESP32 — built from scr
 ## Editor & Extras
 - Full line editor (`edit`) with mid-line cursor movement, line insert/delete, and Up/Down navigation between lines
 - `nixfetch` — a neofetch-style system summary with a customizable ASCII logo
+- `loop <count|inf> [-i seconds] <command...>` — repeats a command, since the script engine has no real loop construct; any keypress stops it early
 
 ## Hardware
 - ESP32 (required)
