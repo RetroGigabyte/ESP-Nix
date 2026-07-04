@@ -96,7 +96,7 @@ public:
   }
 
   void init() {
-    term.println("ESP-Nix 0.8.9");
+    term.println("ESP-Nix 0.9.0");
     term.println("Type 'help' for command list\n");
   }
 
@@ -273,7 +273,8 @@ public:
     // than a hardcoded string, so real account-switching later needs no
     // changes here.
     String user = (varsPtr && varsPtr->exists("USER")) ? varsPtr->get("USER") : "root";
-    String prompt = user + "@nix:";
+    String hostname = (varsPtr && varsPtr->exists("HOSTNAME")) ? varsPtr->get("HOSTNAME") : "esp-nix";
+    String prompt = user + "@" + hostname + ":";
     String cwd = fs.getCurrentPath();
 
     if (cwd.length() > 20) {

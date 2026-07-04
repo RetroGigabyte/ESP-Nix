@@ -89,7 +89,7 @@ After booting, you'll see the shell prompt:
 
 ```
 root@nix:/$ help
-ESP-Nix 0.8.9 - Available commands:
+ESP-Nix 0.9.0 - Available commands:
   help        - Show this help
   ls [path]   - List directory
   pwd         - Print working directory
@@ -121,11 +121,11 @@ ESP-Nix 0.8.9 - Available commands:
 
 ```bash
 nix:/$ uname
-ESP-Nix 0.8.9
+ESP-Nix 0.9.0
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
-Flash: 4MB | RAM: 320KB SRAM
+Flash: 4MB | RAM: 520KB SRAM (~300KB usable after reserved regions)
 
 nix:/$ ls
 readme.txt
@@ -162,11 +162,11 @@ A declarative OS for ESP32.
 nix:/$ uname > sysinfo.txt
 nix:/$ echo "more info" >> sysinfo.txt
 nix:/$ cat sysinfo.txt
-ESP-Nix 0.8.9
+ESP-Nix 0.9.0
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
-Flash: 4MB | RAM: 320KB SRAM
+Flash: 4MB | RAM: 520KB SRAM (~300KB usable after reserved regions)
 more info
 
 nix:/$ cat readme.txt | grep Welcome
@@ -192,7 +192,7 @@ nix:/$ rm -r /data/system-backup-2
 
 Both also accept a glob in the source: `mv cool.* sd` moves every file starting with `cool.` into `/sd`. Supported patterns are `*.txt`, `cool.*`, `*cool*`, and `*` — same matching `find` uses.
 
-If a glob matches more than one file and the destination doesn't exist yet, it's auto-created as a directory so each match gets its own name inside it — e.g. `mv *.retro retron` creates `retron/` and moves every script into it. (Fixed in v0.8.9 — previously, multiple matches with a not-yet-existing destination all landed on the same literal path and clobbered each other.)
+If a glob matches more than one file and the destination doesn't exist yet, it's auto-created as a directory so each match gets its own name inside it — e.g. `mv *.retro retron` creates `retron/` and moves every script into it. (Fixed in v0.9.0 — previously, multiple matches with a not-yet-existing destination all landed on the same literal path and clobbered each other.)
 
 ### find, wc, du
 
@@ -239,7 +239,7 @@ SD          7580MB  12MB  7568MB      0%
 
 If no card is inserted, `/sd` simply doesn't appear in `ls /` and boot proceeds normally — the SD card is entirely optional.
 
-**Fixed bug (v0.8.9): `mkdir` on the SD card, followed by a bare `ls` in the same directory, wouldn't show the new folder** even though it genuinely existed (confirmed via `cd` into it directly). Root cause: the shell's current-directory path always carries a trailing slash (e.g. `/sd/etc/`), and `SD_MMC`'s VFS layer doesn't reliably open a directory for *listing* with a trailing slash present, even though `exists()`/`isDir()` (used by `cd`) tolerate it fine. Fixed by normalizing trailing slashes out of every path before it reaches the underlying filesystem, in `FileSystem::stripSd()` - the one place all file operations already route through.
+**Fixed bug (v0.9.0): `mkdir` on the SD card, followed by a bare `ls` in the same directory, wouldn't show the new folder** even though it genuinely existed (confirmed via `cd` into it directly). Root cause: the shell's current-directory path always carries a trailing slash (e.g. `/sd/etc/`), and `SD_MMC`'s VFS layer doesn't reliably open a directory for *listing* with a trailing slash present, even though `exists()`/`isDir()` (used by `cd`) tolerate it fine. Fixed by normalizing trailing slashes out of every path before it reaches the underlying filesystem, in `FileSystem::stripSd()` - the one place all file operations already route through.
 
 ### Editor: Line Editing
 
@@ -404,7 +404,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 0.8.9
+  |:_/ |         OS: ESP-Nix 0.9.0
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -497,7 +497,19 @@ Filenames without a leading `/` resolve relative to the directory the running sc
 
 ### User Profile Framework (early)
 
-The shell prompt now shows the current user (`root@nix:/$` instead of `nix:/$`), reading from the existing `USER` variable rather than a hardcoded string — same for `whoami`. This is just the first piece of an eventual accounts/permissions system: there's still only one user (`root`, set at boot in `main.cpp`), and nothing is actually access-controlled yet. The point of starting here is that the prompt and `whoami` won't need to change again once real account-switching exists later — they already read from the same place a `su`/`login` command would write to.
+The shell prompt shows the current user and hostname (`root@esp-nix:/$` instead of `nix:/$`), reading from the existing `USER`/`HOSTNAME` variables rather than hardcoded strings — same for `whoami`. This is just the first piece of an eventual accounts/permissions system: there's still only one user (`root`, set at boot in `main.cpp`), and nothing is actually access-controlled yet. The point of starting here is that the prompt and `whoami` won't need to change again once real account-switching exists later — they already read from the same place a `su`/`login` command would write to.
+
+`hostname` shows or sets the `HOSTNAME` variable, which is also applied as the actual WiFi hostname (via `WiFi.setHostname()`/`softAPsetHostname()`) the next time the device connects — so it shows up correctly in your router's client list instead of a generic name:
+
+```bash
+nix:/$ hostname
+esp-nix
+
+nix:/$ hostname -s my-esp32
+Hostname set to my-esp32 (takes effect on next WiFi connect)
+nix:/$ hostname -v
+my-esp32
+```
 
 ### sleep
 
@@ -669,7 +681,7 @@ Set `TZ_OFFSET` in `/etc/settings/esp-nix.conf` (seconds from UTC, e.g. `-18000`
 
 ### Archives: extract and compress
 
-`extract` unpacks `.zip`, `.tar.gz`/`.tgz`, `.gz`, and `.tar` archives; `compress` creates them. Real `.zip` files (the kind macOS/Windows create) go through a vendored copy of [miniz](https://github.com/richgel999/miniz); the tar-based formats go through [ESP32-targz](https://github.com/tobozo/ESP32-targz). Both stream through the archive rather than loading it into RAM, so size is limited by free space on the filesystem, not by the ESP32's 320KB of RAM.
+`extract` unpacks `.zip`, `.tar.gz`/`.tgz`, `.gz`, and `.tar` archives; `compress` creates them. Real `.zip` files (the kind macOS/Windows create) go through a vendored copy of [miniz](https://github.com/richgel999/miniz); the tar-based formats go through [ESP32-targz](https://github.com/tobozo/ESP32-targz). Both stream through the archive rather than loading it into RAM, so size is limited by free space on the filesystem, not by the ESP32's ~300KB of usable RAM.
 
 ```bash
 nix:/$ extract project.zip
@@ -695,7 +707,7 @@ Created readme.txt.gz (312 bytes)
 
 **`.zip` entries are stored uncompressed.** Deflate's compressor state (`tdefl_compressor`) needs roughly 300KB in one allocation for its hash tables — more than the ESP32's entire free heap. Entries are written with the zip "stored" method instead, which skips that allocation entirely; the archive is still fully valid and opens fine in any zip tool, it just isn't smaller than the original files. `.gz`/`.tar.gz` compression isn't affected — `ESP32-targz` uses `uzlib`, a lighter-weight deflate implementation built for exactly this kind of memory constraint (~32KB rather than ~300KB), so those formats do actually compress.
 
-**Not supported: `.7z`.** LZMA (7-Zip's compression) typically needs a 1MB–64MB dictionary buffer to decompress — the ESP32 only has 320KB of RAM total, so this is a hardware ceiling rather than a missing feature.
+**Not supported: `.7z`.** LZMA (7-Zip's compression) typically needs a 1MB–64MB dictionary buffer to decompress — the ESP32 only has ~300KB of usable RAM, so this is a hardware ceiling rather than a missing feature.
 
 ### OTA Firmware Updates
 
@@ -834,7 +846,7 @@ src/
 - **Limited to 255 char** command lines
 - **History is in-memory only** — cleared on reboot
 - **Browser terminal is request/response, not a live stream** — full-screen commands like `edit` need Serial or PS/2
-- **No `.7z` support** — LZMA's dictionary requirements (1MB–64MB) exceed the ESP32's entire 320KB of RAM, a hardware ceiling rather than a missing feature
+- **No `.7z` support** — LZMA's dictionary requirements (1MB–64MB) exceed the ESP32's entire ~300KB of usable RAM, a hardware ceiling rather than a missing feature
 - **No real memory swap** — the ESP32 has no paging MMU, so this isn't feasible on this hardware at all
 
 ## Next Steps

@@ -115,7 +115,11 @@ void setup() {
       "# Directories searched (in order) for a matching <name>.sh when a\n"
       "# typed command isn't built in - same idea as a real Unix PATH.\n"
       "# Colon-separated, e.g. /system:/data/scripts\n"
-      "PATH=/system\n");
+      "PATH=/system\n"
+      "\n"
+      "# Shown in the shell prompt (user@hostname:/$) and applied as the\n"
+      "# actual WiFi hostname on next connect. Change with 'hostname -s NAME'.\n"
+      "HOSTNAME=esp-nix\n");
   }
 
   if (!fsys.exists("/etc/settings/timezones.txt")) {

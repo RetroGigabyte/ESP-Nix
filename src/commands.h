@@ -66,7 +66,7 @@ public:
       "grep", "head", "tail", "mkdir", "clear", "edit", "env", "uname",
       "whoami", "date", "df", "free", "nixos-rebuild", "webserver", "update",
       "find", "wc", "du", "reboot", "ntp", "extract", "compress", "test", "settz", "nixfetch", "loop",
-      "wifi", "ip", "ping", "curl", "retron", "sleep", "exit"
+      "wifi", "ip", "ping", "curl", "retron", "sleep", "hostname", "exit"
     };
     return names;
   }
@@ -151,6 +151,7 @@ private:
     if (cmd == "curl") return cmdCurl(args);
     if (cmd == "retron") return cmdRetron(args);
     if (cmd == "sleep") return cmdSleep(args);
+    if (cmd == "hostname") return cmdHostname(args);
     if (cmd == "exit") return cmdExit(args);
 
     return tryRunSystemScript(cmd, args);
@@ -253,20 +254,29 @@ private:
     // one-time capture like running it yourself right before opening web.
     String nixfetchOutput = executor("nixfetch");
 
+    String hostname = (vars && vars->exists("HOSTNAME")) ? vars->get("HOSTNAME") : "esp-nix";
+
     // Prefer a previously-joined WPA2 network (see 'web -join') so the
     // server lands on the same network as your computer; fall back to
     // hosting its own access point otherwise.
     String staSsid = (vars && vars->exists("WIFI_SSID")) ? vars->get("WIFI_SSID") : "";
     if (staSsid.length() > 0) {
       String staPass = (vars && vars->exists("WIFI_PASS")) ? vars->get("WIFI_PASS") : "";
-      webServer.runSTA(fs, term, staSsid, staPass, executor, cwdGetter, nixfetchOutput);
+      webServer.runSTA(fs, term, staSsid, staPass, executor, cwdGetter, nixfetchOutput, hostname);
       return true;
     }
 
     String ssid = (vars && vars->exists("WEB_SSID")) ? vars->get("WEB_SSID") : "ESP-Nix";
     String password = (vars && vars->exists("WEB_PASS")) ? vars->get("WEB_PASS") : "";
-    webServer.run(fs, term, ssid, password, executor, cwdGetter, nixfetchOutput);
+    webServer.run(fs, term, ssid, password, executor, cwdGetter, nixfetchOutput, hostname);
     return true;
+  }
+
+  // Applies the configured HOSTNAME to the WiFi stack - must be called
+  // after WiFi.mode() but before begin()/softAP() to take effect.
+  void applyWifiHostname() {
+    String hostname = (vars && vars->exists("HOSTNAME")) ? vars->get("HOSTNAME") : "esp-nix";
+    WiFi.setHostname(hostname.c_str());
   }
 
   bool wifiScanAndList() {
@@ -307,6 +317,7 @@ private:
 
     term.println("Joining " + ssid + " ...");
     WiFi.mode(WIFI_STA);
+    applyWifiHostname();
     WiFi.begin(ssid.c_str(), password.c_str());
 
     unsigned long start = millis();
@@ -399,6 +410,7 @@ private:
     }
 
     WiFi.mode(WIFI_STA);
+    applyWifiHostname();
     WiFi.begin(ssid.c_str(), password.c_str());
 
     term.println("Joining " + ssid + " ...");
@@ -560,6 +572,7 @@ private:
       String pass = (vars && vars->exists("WIFI_PASS")) ? vars->get("WIFI_PASS") : "";
       term.println("Connecting to " + ssid + " for time sync...");
       WiFi.mode(WIFI_STA);
+      applyWifiHostname();
       WiFi.begin(ssid.c_str(), pass.c_str());
 
       unsigned long start = millis();
@@ -955,7 +968,7 @@ private:
   }
 
   bool cmdHelp(const std::vector<String>& args) {
-    out("ESP-Nix 0.8.9 - Available commands:");
+    out("ESP-Nix 0.9.0 - Available commands:");
     out("  help        - Show this help");
     out("  ls [-l] [path] - List directory (-l for permissions/size/date)");
     out("  pwd         - Print working directory");
@@ -1006,6 +1019,7 @@ private:
     out("  curl [-X METHOD] [-d data] <url> - Basic HTTP client");
     out("  retron <file.retro> - Run a Retron language script (variables/loops/if)");
     out("  sleep <seconds> - Pause (any key interrupts)");
+    out("  hostname [-v] | hostname -s <name> - Show/set hostname (prompt + WiFi)");
     out("  cat /proc/{version,uptime,meminfo,cpuinfo} - Virtual system info");
     out("  /system/*.sh files run anywhere by name (no ./ or .sh)");
     return true;
@@ -1099,7 +1113,7 @@ private:
   // info as readable pseudo-files rather than only via commands.
   bool getProcContent(const String& path, String& content) {
     if (path == "/proc/version") {
-      content = "ESP-Nix version 0.8.9 (FreeRTOS) Xtensa\n";
+      content = "ESP-Nix version 0.9.0 (FreeRTOS) Xtensa\n";
       return true;
     }
     if (path == "/proc/uptime") {
@@ -1265,11 +1279,11 @@ private:
   }
 
   bool cmdUname(const std::vector<String>& args) {
-    out("ESP-Nix 0.8.9");
+    out("ESP-Nix 0.9.0");
     out("System: ESP32 WROOM32E");
     out("Arch: Xtensa");
     out("Kernel: FreeRTOS");
-    out("Flash: 4MB | RAM: 320KB SRAM");
+    out("Flash: 4MB | RAM: 520KB SRAM (~300KB usable after reserved regions)");
     return true;
   }
 
@@ -1317,7 +1331,7 @@ private:
     std::vector<String> info;
     info.push_back("root@esp-nix");
     info.push_back("------------");
-    info.push_back("OS: ESP-Nix 0.8.9");
+    info.push_back("OS: ESP-Nix 0.9.0");
     info.push_back("Host: ESP32 WROOM32E");
     info.push_back("Kernel: FreeRTOS");
     info.push_back("Uptime: " + formatUptime(millis() / 1000));
@@ -1348,6 +1362,29 @@ private:
 
   bool cmdWhoami(const std::vector<String>& args) {
     out((vars && vars->exists("USER")) ? vars->get("USER") : "root");
+    return true;
+  }
+
+  // hostname (or -v): show current hostname. hostname -s NAME: set it
+  // (updates the live prompt immediately, and persists to config so it
+  // also becomes the WiFi hostname on next connect).
+  bool cmdHostname(const std::vector<String>& args) {
+    String current = (vars && vars->exists("HOSTNAME")) ? vars->get("HOSTNAME") : "esp-nix";
+
+    if (args.size() < 2 || args[1] == "-v") {
+      out(current);
+      return true;
+    }
+
+    if (args[1] == "-s" && args.size() >= 3) {
+      String newName = args[2];
+      if (vars) vars->set("HOSTNAME", newName);
+      setConfigValue("/etc/settings/esp-nix.conf", "HOSTNAME", newName);
+      term.println("Hostname set to " + newName + " (takes effect on next WiFi connect)");
+      return true;
+    }
+
+    term.println("Usage: hostname [-v] | hostname -s <name>");
     return true;
   }
 
@@ -1447,7 +1484,7 @@ private:
   // when the destination was just auto-created by cmdCp/cmdMv (for a
   // multi-match glob), re-querying fs.exists()/isDir() immediately
   // afterward isn't reliable on SD_MMC - the same class of VFS quirk
-  // fixed for 'ls' in stripSd() (see v0.8.9's mkdir+ls bug fix).
+  // fixed for 'ls' in stripSd() (see v0.9.0's mkdir+ls bug fix).
   String resolveDestPath(const String& srcPath, const String& destPath, bool destIsDir) {
     if (destIsDir) {
       String base = srcPath;

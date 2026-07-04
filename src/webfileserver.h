@@ -31,13 +31,15 @@ public:
 
   // Starts its own WiFi access point (works anywhere, no router needed)
   void run(FileSystem& fs, Terminal& term, const String& ssid, const String& password,
-           CommandExecutor executeCmd, CwdGetter getCwd, const String& nixfetchOutput) {
+           CommandExecutor executeCmd, CwdGetter getCwd, const String& nixfetchOutput,
+           const String& hostname) {
     ensureDefaultPages();
 
     WebServer server(80);
     setupRoutes(fs, term, server, executeCmd, getCwd, nixfetchOutput);
 
     WiFi.mode(WIFI_AP);
+    WiFi.softAPsetHostname(hostname.c_str());
     bool apOk = (password.length() >= 8)
       ? WiFi.softAP(ssid.c_str(), password.c_str())
       : WiFi.softAP(ssid.c_str());
@@ -65,8 +67,10 @@ public:
   // Joins an existing WPA2 network instead of hosting its own AP, so the
   // server is reachable on the same network as your phone/computer.
   void runSTA(FileSystem& fs, Terminal& term, const String& ssid, const String& password,
-              CommandExecutor executeCmd, CwdGetter getCwd, const String& nixfetchOutput) {
+              CommandExecutor executeCmd, CwdGetter getCwd, const String& nixfetchOutput,
+              const String& hostname) {
     WiFi.mode(WIFI_STA);
+    WiFi.setHostname(hostname.c_str());
     WiFi.begin(ssid.c_str(), password.c_str());
 
     term.println("Joining " + ssid + " ...");
