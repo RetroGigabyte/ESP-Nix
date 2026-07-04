@@ -28,6 +28,10 @@ A declarative, Unix-like shell operating system for the ESP32 — built from scr
 - `curl [-X METHOD] [-d data] <url>` — basic HTTP/HTTPS client (HTTPS via `WiFiClientSecure::setInsecure()`, no certificate validation)
 - OTA updates via `update`, with pre-flight validation (size and firmware-header checks) before touching flash
 
+**Flash usage:** HTTPS support (`WiFiClientSecure`'s TLS stack) added ~140KB to the firmware image — this build sits at 94.7% of the 1.3MB OTA partition (~70KB headroom left). Worth checking before adding anything else substantial.
+
+**Tested:** `wifi connect` → `curl`/`ping` → `wifi disconnect` cycle confirmed via `free` — heap climbs while connected (WiFi + TLS runtime buffers) and drops back down after `wifi disconnect`, with no growth across repeated cycles.
+
 ## Editor & Extras
 - Full line editor (`edit`) with mid-line cursor movement, line insert/delete, and Up/Down navigation between lines
 - `nixfetch` — a neofetch-style system summary with a customizable ASCII logo
