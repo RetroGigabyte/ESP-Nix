@@ -955,7 +955,7 @@ private:
   }
 
   bool cmdHelp(const std::vector<String>& args) {
-    out("ESP-Nix 0.8.8 - Available commands:");
+    out("ESP-Nix 0.8.9 - Available commands:");
     out("  help        - Show this help");
     out("  ls [-l] [path] - List directory (-l for permissions/size/date)");
     out("  pwd         - Print working directory");
@@ -1099,7 +1099,7 @@ private:
   // info as readable pseudo-files rather than only via commands.
   bool getProcContent(const String& path, String& content) {
     if (path == "/proc/version") {
-      content = "ESP-Nix version 0.8.8 (FreeRTOS) Xtensa\n";
+      content = "ESP-Nix version 0.8.9 (FreeRTOS) Xtensa\n";
       return true;
     }
     if (path == "/proc/uptime") {
@@ -1265,7 +1265,7 @@ private:
   }
 
   bool cmdUname(const std::vector<String>& args) {
-    out("ESP-Nix 0.8.8");
+    out("ESP-Nix 0.8.9");
     out("System: ESP32 WROOM32E");
     out("Arch: Xtensa");
     out("Kernel: FreeRTOS");
@@ -1317,7 +1317,7 @@ private:
     std::vector<String> info;
     info.push_back("root@esp-nix");
     info.push_back("------------");
-    info.push_back("OS: ESP-Nix 0.8.8");
+    info.push_back("OS: ESP-Nix 0.8.9");
     info.push_back("Host: ESP32 WROOM32E");
     info.push_back("Kernel: FreeRTOS");
     info.push_back("Uptime: " + formatUptime(millis() / 1000));
@@ -1347,7 +1347,7 @@ private:
   }
 
   bool cmdWhoami(const std::vector<String>& args) {
-    out("root");
+    out((vars && vars->exists("USER")) ? vars->get("USER") : "root");
     return true;
   }
 
@@ -1447,7 +1447,7 @@ private:
   // when the destination was just auto-created by cmdCp/cmdMv (for a
   // multi-match glob), re-querying fs.exists()/isDir() immediately
   // afterward isn't reliable on SD_MMC - the same class of VFS quirk
-  // fixed for 'ls' in stripSd() (see v0.8.8's mkdir+ls bug fix).
+  // fixed for 'ls' in stripSd() (see v0.8.9's mkdir+ls bug fix).
   String resolveDestPath(const String& srcPath, const String& destPath, bool destIsDir) {
     if (destIsDir) {
       String base = srcPath;

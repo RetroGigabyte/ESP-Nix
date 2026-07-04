@@ -96,7 +96,7 @@ public:
   }
 
   void init() {
-    term.println("ESP-Nix 0.8.8");
+    term.println("ESP-Nix 0.8.9");
     term.println("Type 'help' for command list\n");
   }
 
@@ -267,7 +267,13 @@ public:
   }
 
   void showPrompt() {
-    String prompt = "nix:";
+    // USER already exists as a variable (set at boot, currently always
+    // "root") - this is the first piece of an eventual user-profiles
+    // framework: the prompt reflects whoever USER says it is, rather
+    // than a hardcoded string, so real account-switching later needs no
+    // changes here.
+    String user = (varsPtr && varsPtr->exists("USER")) ? varsPtr->get("USER") : "root";
+    String prompt = user + "@nix:";
     String cwd = fs.getCurrentPath();
 
     if (cwd.length() > 20) {
