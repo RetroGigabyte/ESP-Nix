@@ -110,7 +110,12 @@ void setup() {
       "# DATE_FORMAT: us (7/3/2027) or iso (2027/7/3)\n"
       "# TIME_FORMAT: 24 (15:04:05) or 12 (3:04:05 PM)\n"
       "DATE_FORMAT=us\n"
-      "TIME_FORMAT=24\n");
+      "TIME_FORMAT=24\n"
+      "\n"
+      "# Directories searched (in order) for a matching <name>.sh when a\n"
+      "# typed command isn't built in - same idea as a real Unix PATH.\n"
+      "# Colon-separated, e.g. /system:/data/scripts\n"
+      "PATH=/system\n");
   }
 
   if (!fsys.exists("/etc/settings/timezones.txt")) {

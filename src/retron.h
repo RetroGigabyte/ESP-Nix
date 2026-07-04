@@ -26,6 +26,8 @@ public:
   std::vector<String> lines;
   int pc = 0;
   std::map<String, RetronFunctionDef> functions;
+  bool quit = false;
+  String scriptDir = "/";  // directory the current script was loaded from, for LOAD's relative paths
 
   RetronInterpreter(FileSystem& f, Terminal& t) : fs(f), term(t) {}
 
@@ -35,6 +37,9 @@ public:
       term.println("retron: file not found or empty: " + path);
       return false;
     }
+
+    int slash = path.lastIndexOf('/');
+    scriptDir = (slash >= 0) ? path.substring(0, slash + 1) : "/";
 
     lines.clear();
     int start = 0;
@@ -75,7 +80,8 @@ public:
 
   void execute() {
     pc = 0;
-    while (pc < (int)lines.size()) {
+    quit = false;
+    while (pc < (int)lines.size() && !quit) {
       const String& line = lines[pc];
       if ((line.startsWith("$\"")) || line == "$") {
         pc++;
@@ -199,9 +205,146 @@ private:
       executeLoop((int)getValue(args));
     } else if (cmd == "IF") {
       executeIf(args);
+    } else if (cmd == "OPEN") {
+      executeOpen(args);
+    } else if (cmd == "READ") {
+      executeRead(args);
+    } else if (cmd == "WRITE") {
+      executeWrite(args);
+    } else if (cmd == "LOAD") {
+      executeLoad(args);
+    } else if (cmd == "QUIT") {
+      quit = true;
     } else if (lineIn.indexOf('=') >= 0 && lineIn.indexOf('<') < 0 && lineIn.indexOf('>') < 0) {
       executeAssignment(lineIn);
     }
+  }
+
+  // OPEN file - reads and prints the whole file, bracketed like the
+  // reference implementation.
+  void executeOpen(const String& args) {
+    String filename = resolveScriptPath(args);
+    filename.trim();
+    if (!fs.exists(filename)) {
+      term.println("ERROR: Cannot open " + args);
+      return;
+    }
+    term.println("--- " + args + " ---");
+    term.println(fs.readFile(filename));
+    term.println("--- End ---");
+  }
+
+  // READ "function_name" runs a defined function inline (like calling
+  // it); READ file line# prints one line (1-indexed) from a file.
+  void executeRead(const String& args) {
+    String a = args;
+    a.trim();
+
+    if (a.startsWith("\"") && a.endsWith("\"") && a.length() >= 2) {
+      String funcName = a.substring(1, a.length() - 1);
+      if (!functions.count(funcName)) {
+        term.println("ERROR: Undefined function: " + funcName);
+        return;
+      }
+      RetronFunctionDef def = functions[funcName];
+      int savedPc = pc;
+      pc = def.start;
+      while (pc < def.end) {
+        executeLine(lines[pc]);
+        pc++;
+      }
+      pc = savedPc;
+      return;
+    }
+
+    int lastSpace = a.lastIndexOf(' ');
+    if (lastSpace < 0) {
+      term.println("ERROR: Usage: READ file line#");
+      return;
+    }
+    String filename = resolveScriptPath(a.substring(0, lastSpace));
+    int lineNum = (int)getValue(a.substring(lastSpace + 1)) - 1;  // 1-indexed -> 0-indexed
+
+    if (!fs.exists(filename)) {
+      term.println("ERROR: Cannot read " + a.substring(0, lastSpace));
+      return;
+    }
+    std::vector<String> fileLines = splitFileLines(fs.readFile(filename));
+    if (lineNum >= 0 && lineNum < (int)fileLines.size()) {
+      term.println(fileLines[lineNum]);
+    } else {
+      term.println("ERROR: Line " + String(lineNum + 1) + " not found in " + a.substring(0, lastSpace));
+    }
+  }
+
+  // WRITE "text" file OR WRITE /var file - appends a line to a file.
+  void executeWrite(const String& args) {
+    int lastSpace = args.lastIndexOf(' ');
+    if (lastSpace < 0) {
+      term.println("ERROR: Usage: WRITE \"text\"|/var file");
+      return;
+    }
+    String contentStr = args.substring(0, lastSpace);
+    String filename = resolveScriptPath(args.substring(lastSpace + 1));
+    contentStr.trim();
+
+    String text;
+    if (contentStr.startsWith("\"") && contentStr.endsWith("\"") && contentStr.length() >= 2) {
+      text = contentStr.substring(1, contentStr.length() - 1);
+    } else if (contentStr.startsWith("/")) {
+      String varName = contentStr.substring(1);
+      text = stringVariables.count(varName) ? stringVariables[varName] : String((int)variables[varName]);
+    } else {
+      text = contentStr;
+    }
+
+    String existing = fs.readFile(filename);
+    if (existing.length() > 0 && !existing.endsWith("\n")) existing += "\n";
+    fs.writeFile(filename, existing + text + "\n");
+  }
+
+  // LOAD file.retro - runs a sub-script sharing this interpreter's
+  // variables (copied in, then copied back out when it finishes).
+  void executeLoad(const String& args) {
+    String filename = args;
+    filename.trim();
+    String resolved = resolveScriptPath(filename);
+    if (!fs.exists(resolved) && !filename.endsWith(".retro")) {
+      String withExt = resolveScriptPath(filename + ".retro");
+      if (fs.exists(withExt)) resolved = withExt;
+    }
+
+    term.println("[Loading module: " + filename + "]");
+    RetronInterpreter sub(fs, term);
+    sub.variables = variables;
+    sub.stringVariables = stringVariables;
+    if (sub.loadScript(resolved)) {
+      sub.execute();
+      variables = sub.variables;
+      stringVariables = sub.stringVariables;
+    }
+    term.println("[Module loaded]");
+  }
+
+  // Resolves a script-referenced filename against the directory the
+  // currently-running script was loaded from, unless it's already
+  // absolute - so scripts can reference sibling files by plain name.
+  String resolveScriptPath(String p) {
+    p.trim();
+    if (p.startsWith("/")) return p;
+    return scriptDir + p;
+  }
+
+  std::vector<String> splitFileLines(const String& content) {
+    std::vector<String> result;
+    int start = 0;
+    for (int i = 0; i <= (int)content.length(); i++) {
+      if (i == (int)content.length() || content[i] == '\n') {
+        result.push_back(content.substring(start, i));
+        start = i + 1;
+      }
+    }
+    return result;
   }
 
   String evaluateString(const String& str) {
@@ -238,9 +381,9 @@ private:
   void executeLoop(int count) {
     int startPc = pc + 1;
     int endPc = findEnd(startPc);
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < count && !quit; i++) {
       pc = startPc;
-      while (pc < endPc) {
+      while (pc < endPc && !quit) {
         executeLine(lines[pc]);
         pc++;
       }
@@ -253,7 +396,7 @@ private:
     if (evalCondition(condition)) {
       int endPc = findEnd(startPc);
       pc = startPc;
-      while (pc < endPc) {
+      while (pc < endPc && !quit) {
         String upper = lines[pc];
         upper.toUpperCase();
         if (upper.indexOf("ELSE") >= 0) break;

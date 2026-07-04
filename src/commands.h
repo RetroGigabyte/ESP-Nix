@@ -160,15 +160,34 @@ private:
   // no ./ prefix and no .sh extension needed - e.g. /system/backup.sh
   // becomes runnable as just "backup". Anything typed after the name is
   // forwarded to the script wherever it writes "$@".
+  // Checks each ':'-separated directory in PATH (defaults to just
+  // /system if unset) in order, running the first "<cmd>.sh" match -
+  // same lookup order convention as a real Unix PATH.
   bool tryRunSystemScript(const String& cmd, const std::vector<String>& args) {
-    String scriptPath = "/system/" + cmd + ".sh";
-    if (fs.exists(scriptPath)) {
-      String extraArgs = "";
-      for (size_t i = 1; i < args.size(); i++) {
-        if (i > 1) extraArgs += " ";
-        extraArgs += args[i];
+    String pathVar = (vars && vars->exists("PATH")) ? vars->get("PATH") : "/system";
+
+    int start = 0;
+    while (start <= (int)pathVar.length()) {
+      int colon = pathVar.indexOf(':', start);
+      String dir = (colon >= 0) ? pathVar.substring(start, colon) : pathVar.substring(start);
+      dir.trim();
+
+      if (dir.length() > 0) {
+        if (!dir.endsWith("/")) dir += "/";
+        String scriptPath = dir + cmd + ".sh";
+
+        if (fs.exists(scriptPath)) {
+          String extraArgs = "";
+          for (size_t i = 1; i < args.size(); i++) {
+            if (i > 1) extraArgs += " ";
+            extraArgs += args[i];
+          }
+          return runScriptFile(scriptPath, false, extraArgs);
+        }
       }
-      return runScriptFile(scriptPath, false, extraArgs);
+
+      if (colon < 0) break;
+      start = colon + 1;
     }
 
     term.println("Unknown command: " + cmd);
@@ -936,7 +955,7 @@ private:
   }
 
   bool cmdHelp(const std::vector<String>& args) {
-    out("ESP-Nix 0.8.7 - Available commands:");
+    out("ESP-Nix 0.8.8 - Available commands:");
     out("  help        - Show this help");
     out("  ls [-l] [path] - List directory (-l for permissions/size/date)");
     out("  pwd         - Print working directory");
@@ -1080,7 +1099,7 @@ private:
   // info as readable pseudo-files rather than only via commands.
   bool getProcContent(const String& path, String& content) {
     if (path == "/proc/version") {
-      content = "ESP-Nix version 0.8.7 (FreeRTOS) Xtensa\n";
+      content = "ESP-Nix version 0.8.8 (FreeRTOS) Xtensa\n";
       return true;
     }
     if (path == "/proc/uptime") {
@@ -1246,7 +1265,7 @@ private:
   }
 
   bool cmdUname(const std::vector<String>& args) {
-    out("ESP-Nix 0.8.7");
+    out("ESP-Nix 0.8.8");
     out("System: ESP32 WROOM32E");
     out("Arch: Xtensa");
     out("Kernel: FreeRTOS");
@@ -1298,7 +1317,7 @@ private:
     std::vector<String> info;
     info.push_back("root@esp-nix");
     info.push_back("------------");
-    info.push_back("OS: ESP-Nix 0.8.7");
+    info.push_back("OS: ESP-Nix 0.8.8");
     info.push_back("Host: ESP32 WROOM32E");
     info.push_back("Kernel: FreeRTOS");
     info.push_back("Uptime: " + formatUptime(millis() / 1000));
@@ -1428,7 +1447,7 @@ private:
   // when the destination was just auto-created by cmdCp/cmdMv (for a
   // multi-match glob), re-querying fs.exists()/isDir() immediately
   // afterward isn't reliable on SD_MMC - the same class of VFS quirk
-  // fixed for 'ls' in stripSd() (see v0.8.7's mkdir+ls bug fix).
+  // fixed for 'ls' in stripSd() (see v0.8.8's mkdir+ls bug fix).
   String resolveDestPath(const String& srcPath, const String& destPath, bool destIsDir) {
     if (destIsDir) {
       String base = srcPath;

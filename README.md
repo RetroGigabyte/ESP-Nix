@@ -31,7 +31,8 @@ A minimal declarative operating system for ESP32 with a Unix-like shell interfac
 - **`loop`**: repeats a command a fixed number of times or indefinitely, since the script engine has no real loop construct
 - **`wifi`/`ip`/`ping`**: a persistent WiFi connection (`wifi connect`) that stays up in the background, plus status/IP lookup and host reachability checks
 - **`curl`**: basic HTTP/HTTPS client for scripts and quick API checks
-- **`retron`**: runs [Retron](https://github.com/RetroGigabyte/Retron) scripts — real variables, `if`/`loop`/functions, `INPUT` for reading text, genuinely new logic beyond what `/system`/`/boot` scripts can sequence
+- **`retron`**: runs [Retron](https://github.com/RetroGigabyte/Retron) scripts — real variables, `if`/`loop`/functions, `INPUT`/`OPEN`/`READ`/`WRITE`/`LOAD`/`QUIT`, genuinely new logic beyond what `/system`/`/boot` scripts can sequence
+- **`PATH`**: `/system`-style script directories now configurable (colon-separated) in `/etc/settings/esp-nix.conf`, checked in order for a matching command
 - **`sleep <seconds>`**: pauses, interruptible by any keypress
 - **Folder downloads + `nixfetch` on the web page**: `web`'s file manager zips folders on the fly for download, and shows a `nixfetch` snapshot taken when `web` starts
 
@@ -88,7 +89,7 @@ After booting, you'll see the shell prompt:
 
 ```
 nix:/$ help
-ESP-Nix 0.8.7 - Available commands:
+ESP-Nix 0.8.8 - Available commands:
   help        - Show this help
   ls [path]   - List directory
   pwd         - Print working directory
@@ -120,7 +121,7 @@ ESP-Nix 0.8.7 - Available commands:
 
 ```bash
 nix:/$ uname
-ESP-Nix 0.8.7
+ESP-Nix 0.8.8
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -161,7 +162,7 @@ A declarative OS for ESP32.
 nix:/$ uname > sysinfo.txt
 nix:/$ echo "more info" >> sysinfo.txt
 nix:/$ cat sysinfo.txt
-ESP-Nix 0.8.7
+ESP-Nix 0.8.8
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -191,7 +192,7 @@ nix:/$ rm -r /data/system-backup-2
 
 Both also accept a glob in the source: `mv cool.* sd` moves every file starting with `cool.` into `/sd`. Supported patterns are `*.txt`, `cool.*`, `*cool*`, and `*` — same matching `find` uses.
 
-If a glob matches more than one file and the destination doesn't exist yet, it's auto-created as a directory so each match gets its own name inside it — e.g. `mv *.retro retron` creates `retron/` and moves every script into it. (Fixed in v0.8.7 — previously, multiple matches with a not-yet-existing destination all landed on the same literal path and clobbered each other.)
+If a glob matches more than one file and the destination doesn't exist yet, it's auto-created as a directory so each match gets its own name inside it — e.g. `mv *.retro retron` creates `retron/` and moves every script into it. (Fixed in v0.8.8 — previously, multiple matches with a not-yet-existing destination all landed on the same literal path and clobbered each other.)
 
 ### find, wc, du
 
@@ -238,7 +239,7 @@ SD          7580MB  12MB  7568MB      0%
 
 If no card is inserted, `/sd` simply doesn't appear in `ls /` and boot proceeds normally — the SD card is entirely optional.
 
-**Fixed bug (v0.8.7): `mkdir` on the SD card, followed by a bare `ls` in the same directory, wouldn't show the new folder** even though it genuinely existed (confirmed via `cd` into it directly). Root cause: the shell's current-directory path always carries a trailing slash (e.g. `/sd/etc/`), and `SD_MMC`'s VFS layer doesn't reliably open a directory for *listing* with a trailing slash present, even though `exists()`/`isDir()` (used by `cd`) tolerate it fine. Fixed by normalizing trailing slashes out of every path before it reaches the underlying filesystem, in `FileSystem::stripSd()` - the one place all file operations already route through.
+**Fixed bug (v0.8.8): `mkdir` on the SD card, followed by a bare `ls` in the same directory, wouldn't show the new folder** even though it genuinely existed (confirmed via `cd` into it directly). Root cause: the shell's current-directory path always carries a trailing slash (e.g. `/sd/etc/`), and `SD_MMC`'s VFS layer doesn't reliably open a directory for *listing* with a trailing slash present, even though `exists()`/`isDir()` (used by `cd`) tolerate it fine. Fixed by normalizing trailing slashes out of every path before it reaches the underlying filesystem, in `FileSystem::stripSd()` - the one place all file operations already route through.
 
 ### Editor: Line Editing
 
@@ -363,7 +364,15 @@ nix:/data$ hello
 Hello from a system command!
 ```
 
-If a name doesn't match a built-in command, the shell checks `/system/<name>.sh` before giving up with "Unknown command".
+If a name doesn't match a built-in command, the shell checks each directory listed in `PATH` (in `/etc/settings/esp-nix.conf`, colon-separated, defaults to just `/system`) for a matching `<name>.sh`, in order — same convention as a real Unix `PATH`:
+
+```bash
+nix:/$ edit /etc/settings/esp-nix.conf
+# add: PATH=/system:/data/scripts
+nix:/$ nixos-rebuild
+```
+
+Now a script in `/data/scripts` is runnable by name too, checked after `/system`.
 
 ### Boot Scripts (`/boot`)
 
@@ -395,7 +404,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 0.8.7
+  |:_/ |         OS: ESP-Nix 0.8.8
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -475,6 +484,16 @@ You entered: Richard
 input response
 print "You entered: " & /response
 ```
+
+**File I/O and modules** (ported from `retron.py`'s reference implementation):
+
+- `OPEN file` — prints a file's whole content, bracketed with `--- file ---`/`--- End ---`
+- `READ "function_name"` — calls a defined function inline; `READ file line#` — prints one line (1-indexed) from a file
+- `WRITE "text" file` / `WRITE /var file` — appends a line to a file
+- `LOAD file.retro` — runs a sub-script, sharing variables both ways (changes the sub-script makes are visible after it returns)
+- `QUIT` — stops the script immediately, even from inside a `loop`/`if`
+
+Filenames without a leading `/` resolve relative to the directory the running script itself was loaded from, so a script can reference sibling files by plain name regardless of where it's invoked from.
 
 ### sleep
 
