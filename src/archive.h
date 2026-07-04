@@ -331,16 +331,33 @@ private:
       return false;
     }
 
-    String baseName = sourcePath;
-    int slash = baseName.lastIndexOf('/');
-    if (slash >= 0) baseName = baseName.substring(slash + 1);
-
     int added = 0;
-    bool ok;
-    if (fs.isDir(sourcePath)) {
-      ok = addDirToZip(fs, term, zip, sourcePath, baseName, added);
+    bool ok = true;
+
+    if (sourcePath == "/") {
+      // Zipping the filesystem root itself has no sensible basename to
+      // wrap everything in (it'd be an empty/invalid zip entry name, e.g.
+      // "/" or ""), so zip the *contents* of root directly instead - no
+      // wrapping folder, each top-level entry keeps its own name. This is
+      // also the more useful behavior for backups: restoring extracts
+      // straight back onto "/" without an extra nested layer.
+      for (const auto& name : fs.listDir("/")) {
+        String childPath = "/" + name;
+        ok = fs.isDir(childPath)
+          ? addDirToZip(fs, term, zip, childPath, name, added)
+          : addFileToZip(fs, term, zip, childPath, name, added);
+        if (!ok) break;
+      }
     } else {
-      ok = addFileToZip(fs, term, zip, sourcePath, baseName, added);
+      String baseName = sourcePath;
+      int slash = baseName.lastIndexOf('/');
+      if (slash >= 0) baseName = baseName.substring(slash + 1);
+
+      if (fs.isDir(sourcePath)) {
+        ok = addDirToZip(fs, term, zip, sourcePath, baseName, added);
+      } else {
+        ok = addFileToZip(fs, term, zip, sourcePath, baseName, added);
+      }
     }
 
     if (ok) {
