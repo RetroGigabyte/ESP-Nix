@@ -1,0 +1,13 @@
+print "Retron on ESP-Nix!"
+/x = 3
+/y = 4
+/sum = /x + /y
+print "sum is " & [/sum]
+
+loop 3
+  print "looping"
+END
+
+if /sum > 5
+  print "sum is big"
+END

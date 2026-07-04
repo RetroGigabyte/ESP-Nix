@@ -31,6 +31,7 @@ A minimal declarative operating system for ESP32 with a Unix-like shell interfac
 - **`loop`**: repeats a command a fixed number of times or indefinitely, since the script engine has no real loop construct
 - **`wifi`/`ip`/`ping`**: a persistent WiFi connection (`wifi connect`) that stays up in the background, plus status/IP lookup and host reachability checks
 - **`curl`**: basic HTTP/HTTPS client for scripts and quick API checks
+- **`retron`**: runs [Retron](https://github.com/RetroGigabyte/Retron) scripts — real variables, `if`/`loop`/functions, genuinely new logic beyond what `/system`/`/boot` scripts can sequence
 
 ## Hardware
 
@@ -85,7 +86,7 @@ After booting, you'll see the shell prompt:
 
 ```
 nix:/$ help
-ESP-Nix 0.8.3 - Available commands:
+ESP-Nix 0.8.4 - Available commands:
   help        - Show this help
   ls [path]   - List directory
   pwd         - Print working directory
@@ -117,7 +118,7 @@ ESP-Nix 0.8.3 - Available commands:
 
 ```bash
 nix:/$ uname
-ESP-Nix 0.8.3
+ESP-Nix 0.8.4
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -158,7 +159,7 @@ A declarative OS for ESP32.
 nix:/$ uname > sysinfo.txt
 nix:/$ echo "more info" >> sysinfo.txt
 nix:/$ cat sysinfo.txt
-ESP-Nix 0.8.3
+ESP-Nix 0.8.4
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -233,7 +234,7 @@ SD          7580MB  12MB  7568MB      0%
 
 If no card is inserted, `/sd` simply doesn't appear in `ls /` and boot proceeds normally — the SD card is entirely optional.
 
-**Fixed bug (v0.8.3): `mkdir` on the SD card, followed by a bare `ls` in the same directory, wouldn't show the new folder** even though it genuinely existed (confirmed via `cd` into it directly). Root cause: the shell's current-directory path always carries a trailing slash (e.g. `/sd/etc/`), and `SD_MMC`'s VFS layer doesn't reliably open a directory for *listing* with a trailing slash present, even though `exists()`/`isDir()` (used by `cd`) tolerate it fine. Fixed by normalizing trailing slashes out of every path before it reaches the underlying filesystem, in `FileSystem::stripSd()` - the one place all file operations already route through.
+**Fixed bug (v0.8.4): `mkdir` on the SD card, followed by a bare `ls` in the same directory, wouldn't show the new folder** even though it genuinely existed (confirmed via `cd` into it directly). Root cause: the shell's current-directory path always carries a trailing slash (e.g. `/sd/etc/`), and `SD_MMC`'s VFS layer doesn't reliably open a directory for *listing* with a trailing slash present, even though `exists()`/`isDir()` (used by `cd`) tolerate it fine. Fixed by normalizing trailing slashes out of every path before it reaches the underlying filesystem, in `FileSystem::stripSd()` - the one place all file operations already route through.
 
 ### Editor: Line Editing
 
@@ -390,7 +391,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 0.8.3
+  |:_/ |         OS: ESP-Nix 0.8.4
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -421,6 +422,41 @@ Loop stopped.
 ```
 
 `loop <count|inf> [-i seconds] <command...>` — run a fixed number of times, or `inf` until stopped. `-i seconds` sets the delay between runs (default 1 second). Any keypress stops it immediately, even mid-wait.
+
+### retron
+
+Runs scripts in [Retron](https://github.com/RetroGigabyte/Retron), a small language with real variables, `if`/`else`, `loop`, and functions — genuinely new logic on top of what's built in, not just sequences of existing commands (unlike `/system`/`/boot` scripts, which can only combine what the shell already has).
+
+```bash
+nix:/$ retron test.retro
+Retron on ESP-Nix!
+sum is 7
+looping
+looping
+looping
+sum is big
+```
+
+```
+# test.retro
+print "Retron on ESP-Nix!"
+/x = 3
+/y = 4
+/sum = /x + /y
+print "sum is " & [/sum]
+
+loop 3
+  print "looping"
+END
+
+if /sum > 5
+  print "sum is big"
+END
+```
+
+Variables use a `/name` prefix, `&` concatenates strings, `[expr]` embeds an expression in a string, and blocks close with `END` or `@!` (interchangeable). Full syntax reference in the [Retron repo](https://github.com/RetroGigabyte/Retron/blob/master/language.txt).
+
+**`DRAW` isn't supported yet** — Retron's graphics command needs composite video output, which isn't wired up on ESP-Nix (see `goals.md`'s CRT project). Scripts using `DRAW` get a clear message instead of failing silently; once CRT output lands, this is the planned hook-up point.
 
 ### wifi, ip, ping
 

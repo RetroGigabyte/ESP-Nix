@@ -12,6 +12,7 @@
 #include "webfileserver.h"
 #include "otaupdate.h"
 #include "archive.h"
+#include "retron.h"
 #include <ESP32Ping.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
@@ -65,7 +66,7 @@ public:
       "grep", "head", "tail", "mkdir", "clear", "edit", "env", "uname",
       "whoami", "date", "df", "free", "nixos-rebuild", "webserver", "update",
       "find", "wc", "du", "reboot", "ntp", "extract", "compress", "test", "settz", "nixfetch", "loop",
-      "wifi", "ip", "ping", "curl", "exit"
+      "wifi", "ip", "ping", "curl", "retron", "exit"
     };
     return names;
   }
@@ -148,6 +149,7 @@ private:
     if (cmd == "ip") return cmdIp(args);
     if (cmd == "ping") return cmdPing(args);
     if (cmd == "curl") return cmdCurl(args);
+    if (cmd == "retron") return cmdRetron(args);
     if (cmd == "exit") return cmdExit(args);
 
     return tryRunSystemScript(cmd, args);
@@ -493,6 +495,26 @@ private:
     }
 
     http.end();
+    return true;
+  }
+
+  // Runs a .retro script (RetroGigabyte/Retron language), ported from
+  // that project's reference interpreter. DRAW errors clearly rather
+  // than silently no-op'ing, since composite video output isn't wired up
+  // on this ESP-Nix build yet - see goals.md.
+  bool cmdRetron(const std::vector<String>& args) {
+    if (args.size() < 2) {
+      term.println("Usage: retron <file.retro>");
+      return true;
+    }
+
+    String path = fs.resolvePath(args[1]);
+    RetronInterpreter interpreter(fs, term);
+    if (!interpreter.loadScript(path)) {
+      return true;
+    }
+
+    interpreter.execute();
     return true;
   }
 
@@ -908,7 +930,7 @@ private:
   }
 
   bool cmdHelp(const std::vector<String>& args) {
-    out("ESP-Nix 0.8.3 - Available commands:");
+    out("ESP-Nix 0.8.4 - Available commands:");
     out("  help        - Show this help");
     out("  ls [-l] [path] - List directory (-l for permissions/size/date)");
     out("  pwd         - Print working directory");
@@ -957,6 +979,7 @@ private:
     out("  ip            - Show current IP address");
     out("  ping <host>   - Ping a host (requires 'wifi connect' first)");
     out("  curl [-X METHOD] [-d data] <url> - Basic HTTP client");
+    out("  retron <file.retro> - Run a Retron language script (variables/loops/if)");
     out("  cat /proc/{version,uptime,meminfo,cpuinfo} - Virtual system info");
     out("  /system/*.sh files run anywhere by name (no ./ or .sh)");
     return true;
@@ -1050,7 +1073,7 @@ private:
   // info as readable pseudo-files rather than only via commands.
   bool getProcContent(const String& path, String& content) {
     if (path == "/proc/version") {
-      content = "ESP-Nix version 0.8.3 (FreeRTOS) Xtensa\n";
+      content = "ESP-Nix version 0.8.4 (FreeRTOS) Xtensa\n";
       return true;
     }
     if (path == "/proc/uptime") {
@@ -1216,7 +1239,7 @@ private:
   }
 
   bool cmdUname(const std::vector<String>& args) {
-    out("ESP-Nix 0.8.3");
+    out("ESP-Nix 0.8.4");
     out("System: ESP32 WROOM32E");
     out("Arch: Xtensa");
     out("Kernel: FreeRTOS");
@@ -1268,7 +1291,7 @@ private:
     std::vector<String> info;
     info.push_back("root@esp-nix");
     info.push_back("------------");
-    info.push_back("OS: ESP-Nix 0.8.3");
+    info.push_back("OS: ESP-Nix 0.8.4");
     info.push_back("Host: ESP32 WROOM32E");
     info.push_back("Kernel: FreeRTOS");
     info.push_back("Uptime: " + formatUptime(millis() / 1000));
