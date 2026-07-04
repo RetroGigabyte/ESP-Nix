@@ -8,7 +8,7 @@ A minimal declarative operating system for ESP32 with a Unix-like shell interfac
 ## Features
 
 - **Shell interpreter** with common Linux commands
-- **LittleFS file system** for persistent storage (896KB)  
+- **LittleFS file system** for persistent storage (128KB)  
 - **Serial terminal** access (115200 baud)
 - **LCD display** (16x2) for status output
 - **Essential commands**: ls, cd, pwd, cat, echo, rm, cp, mv, grep, head, tail, mkdir, touch, clear, uname, whoami, date, df, free, find, wc, du, reboot
@@ -85,7 +85,7 @@ After booting, you'll see the shell prompt:
 
 ```
 nix:/$ help
-ESP-Nix 0.8.1 - Available commands:
+ESP-Nix 0.8.2 - Available commands:
   help        - Show this help
   ls [path]   - List directory
   pwd         - Print working directory
@@ -117,7 +117,7 @@ ESP-Nix 0.8.1 - Available commands:
 
 ```bash
 nix:/$ uname
-ESP-Nix 0.8.1
+ESP-Nix 0.8.2
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -158,7 +158,7 @@ A declarative OS for ESP32.
 nix:/$ uname > sysinfo.txt
 nix:/$ echo "more info" >> sysinfo.txt
 nix:/$ cat sysinfo.txt
-ESP-Nix 0.8.1
+ESP-Nix 0.8.2
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -388,7 +388,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 0.8.1
+  |:_/ |         OS: ESP-Nix 0.8.2
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -480,19 +480,22 @@ nix:/$ curl -X POST -d "name=test" https://api.example.com/echo
 
 ### Partition Layout
 
-ESP-Nix uses a single 3MB app partition (`huge_app.csv`) instead of the ESP32 Arduino default's two 1.25MB OTA slots:
+ESP-Nix uses two 1.875MB OTA slots (`min_spiffs.csv`) instead of the ESP32 Arduino default's two 1.25MB slots:
 
 | Partition | Type | Offset | Size |
 |---|---|---|---|
 | `nvs` | data (nvs) | `0x9000` | 20KB |
 | `otadata` | data (ota) | `0xe000` | 8KB |
-| `app0` | app (ota_0) | `0x10000` | 3MB |
-| `spiffs` (LittleFS) | data (spiffs) | `0x310000` | 896KB |
+| `app0` | app (ota_0) | `0x10000` | 1.875MB |
+| `app1` | app (ota_1) | `0x1F0000` | 1.875MB |
+| `spiffs` (LittleFS) | data (spiffs) | `0x3D0000` | 128KB |
 | `coredump` | data | `0x3F0000` | 64KB |
 
-**Why:** the default scheme's two 1.25MB slots (for OTA rollback safety) left almost no headroom once HTTPS support and archive handling were added — down to about 74KB free. A single 3MB slot recovers most of that as usable space (currently ~1.87MB free), at the cost of the automatic OTA fallback: if a *passing* update (one that clears the existing size/magic-byte validation but turns out broken once running) gets flashed, there's no second slot to automatically fall back to — recovery means a USB reflash, not an automatic bounce-back. `update`/OTA itself still works exactly the same for routine updates; only that specific failure mode changes.
+**Why:** the default scheme's two 1.25MB slots left almost no headroom once HTTPS support and archive handling were added — down to about 74KB free. Bigger slots recover a lot of that as usable space (~731KB free per slot now), while keeping both slots.
 
-**This is a one-time, USB-only migration.** Since it changes the partition table itself (not just what's inside a slot), it can't go through `update`/OTA — only `pio run -t upload`. It also moves and shrinks the LittleFS partition (1408KB → 896KB), which orphans whatever was stored there previously; everything on internal storage (WiFi credentials, `/etc/settings`, `/boot` scripts, history) resets to defaults on first boot after the switch. The SD card is untouched. Once migrated, `update`/OTA goes back to normal for all future firmware.
+**A single-partition scheme (`huge_app.csv`) was tried first and doesn't work — this is a corrected mistake, not a design choice.** A single `app0` doesn't just remove OTA's rollback safety net, it breaks `update`/OTA outright: the Arduino `Update` library needs a genuinely separate partition to write a new image into while the current one keeps executing. With only one slot, `Update.begin()` ends up writing over the flash pages the CPU is actively running code from, which crashes (`abort()`) the instant it happens. `min_spiffs.csv` keeps two real slots specifically so this can't happen — real dual-slot OTA safety, just with bigger slots than the original default.
+
+**Partition table changes are always a one-time, USB-only migration.** Since they change the table itself (not just what's inside a slot), they can't go through `update`/OTA — only `pio run -t upload`. They also move/resize the LittleFS partition, which orphans whatever was stored there previously; everything on internal storage (WiFi credentials, `/etc/settings`, `/boot` scripts, history) resets to defaults on first boot after any such switch. The SD card is always untouched. Once migrated, `update`/OTA goes back to normal for all future firmware — until the next partition change, if ever.
 
 ### Persistent Command History
 

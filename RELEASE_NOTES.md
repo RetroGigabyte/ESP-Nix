@@ -1,10 +1,10 @@
-# ESP-Nix v0.8.1
+# ESP-Nix v0.8.2
 
 A declarative, Unix-like shell operating system for the ESP32 — built from scratch on FreeRTOS, running entirely off an I2C LCD and a serial console (with optional SD card, PS/2 keyboard, and WiFi).
 
 > **AI Disclaimer:** This project was developed with the assistance of Claude AI. I believe AI-written code should be open source to benefit everyone and maintain transparency.
 
-> **Upgrading from v0.7.x or earlier? You must reflash over USB, not `update`.** This release depends on the new single-partition layout introduced in v0.8.0 (see "Partition Layout Change" below) — the old dual-slot firmware can't OTA-update into it, since changing the partition table itself is something OTA can never do. Run `pio run -t upload` once; every release after that goes back to normal `update`/OTA. Note this also resets everything on internal storage (WiFi credentials, `/etc/settings`, `/boot` scripts, history) — the SD card is untouched.
+> **Upgrading from v0.8.1 or earlier? You must reflash over USB, not `update`.** v0.8.0/v0.8.1 shipped with a partition scheme (`huge_app.csv`) that turned out to break `update`/OTA entirely — see "Partition Layout Fix" below. This release corrects that with a new partition table, which again means a one-time USB-only migration (`pio run -t upload`). Every release after this one goes back to normal `update`/OTA. This also resets everything on internal storage (WiFi credentials, `/etc/settings`, `/boot` scripts, history) — the SD card is untouched.
 
 ## Shell
 - Full command set: `ls` (with `-l`), `cd`, `cat`, `cp`/`mv` (recursive, glob-aware, directory-destination-aware), `rm -r`, `grep`, `head`, `tail`, `find`, `wc`, `du`, `mkdir`, `touch`, `echo`, and more
@@ -39,9 +39,11 @@ A declarative, Unix-like shell operating system for the ESP32 — built from scr
 - `nixfetch` — a neofetch-style system summary with a customizable ASCII logo
 - `loop <count|inf> [-i seconds] <command...>` — repeats a command, since the script engine has no real loop construct; any keypress stops it early
 
-## Partition Layout Change (v0.8.0)
+## Partition Layout Change (v0.8.0) — and Fix (v0.8.2)
 
-Switched from the default two 1.25MB OTA slots to a single 3MB app partition (`huge_app.csv`) - down to ~74KB flash headroom after HTTPS support, now back up to ~1.87MB. Trade-off: no more automatic OTA rollback slot (a passing-but-broken update now needs a USB reflash to recover, instead of an automatic bootloader fallback); LittleFS also shrinks from 1408KB to 896KB. `update`/OTA itself keeps working normally for all routine updates going forward - this only affects that one failure mode, and only this one migration needs USB (it changes the partition table itself, which OTA can never touch). Full details in the README's "Partition Layout" section.
+v0.8.0 switched from the default two 1.25MB OTA slots to a single 3MB app partition (`huge_app.csv`), to recover flash headroom after HTTPS support ate into it. **This turned out to be broken, not just less safe.** A single `app0` doesn't just drop the OTA rollback fallback - it breaks `update`/OTA outright: the Arduino `Update` library needs a genuinely separate partition to write a new image into while the current one keeps executing, and with only one slot, `Update.begin()` ends up overwriting the flash pages the CPU is actively running from, crashing with `abort()` the moment it happens. Confirmed live: `update`-ing to v0.8.1 crashed at 0% and rebooted back into the previously-running v0.8.0 (no data lost, but OTA was non-functional the whole time).
+
+v0.8.2 fixes this with `min_spiffs.csv` — two real 1.875MB OTA slots (up from the default's 1.25MB, and with real fallback safety this time), LittleFS at 128KB. Full details, including why the first attempt failed, in the README's "Partition Layout" section.
 
 ## Hardware
 - ESP32 (required)
