@@ -29,6 +29,7 @@ A minimal declarative operating system for ESP32 with a Unix-like shell interfac
 - **Archive support**: `extract`/`compress` handle real `.zip` plus `.tar.gz`/`.tgz`/`.gz`/`.tar`
 - **`nixfetch`**: a neofetch-style system summary — logo plus live stats (uptime, memory, disk, CPU) side by side, logo customizable via `/etc/settings/logo.txt`
 - **`loop`**: repeats a command a fixed number of times or indefinitely, since the script engine has no real loop construct
+- **`wifi`/`ip`/`ping`**: a persistent WiFi connection (`wifi connect`) that stays up in the background, plus status/IP lookup and host reachability checks
 
 ## Hardware
 
@@ -83,7 +84,7 @@ After booting, you'll see the shell prompt:
 
 ```
 nix:/$ help
-ESP-Nix 0.7.0 - Available commands:
+ESP-Nix 0.7.1 - Available commands:
   help        - Show this help
   ls [path]   - List directory
   pwd         - Print working directory
@@ -115,7 +116,7 @@ ESP-Nix 0.7.0 - Available commands:
 
 ```bash
 nix:/$ uname
-ESP-Nix 0.7.0
+ESP-Nix 0.7.1
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -156,7 +157,7 @@ A declarative OS for ESP32.
 nix:/$ uname > sysinfo.txt
 nix:/$ echo "more info" >> sysinfo.txt
 nix:/$ cat sysinfo.txt
-ESP-Nix 0.7.0
+ESP-Nix 0.7.1
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -386,7 +387,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 0.7.0
+  |:_/ |         OS: ESP-Nix 0.7.1
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -417,6 +418,35 @@ Loop stopped.
 ```
 
 `loop <count|inf> [-i seconds] <command...>` — run a fixed number of times, or `inf` until stopped. `-i seconds` sets the delay between runs (default 1 second). Any keypress stops it immediately, even mid-wait.
+
+### wifi, ip, ping
+
+Every other WiFi operation (`web`, `web -join`, `ntp`) connects, does one thing, and explicitly disconnects and powers the radio off again — there's normally no window where WiFi is up and the shell is free to run something else. `wifi connect` is different: it joins a network and leaves it connected in the background, so `ip`/`ping`/`wifi status` have something to report.
+
+```bash
+nix:/$ wifi connect
+Joining MyHomeNetwork ...
+Joined MyHomeNetwork - IP: 192.168.1.42
+WiFi stays connected in the background - use 'wifi disconnect' to stop.
+
+nix:/$ ip
+192.168.1.42
+
+nix:/$ wifi status
+SSID: MyHomeNetwork
+IP: 192.168.1.42
+RSSI: -52dBm
+MAC: 24:6F:28:AA:BB:CC
+
+nix:/$ ping 8.8.8.8
+Pinging 8.8.8.8 ...
+Reply from 8.8.8.8: avg 23.4ms
+
+nix:/$ wifi disconnect
+WiFi disconnected.
+```
+
+`wifi connect` with no arguments reuses the saved network from `web -join` (`WIFI_SSID`/`WIFI_PASS`); `wifi connect <ssid> [password]` joins a specific network directly without saving it. Starting `web` or `web -join` while a persistent connection is active will reconfigure the radio for that operation instead — last WiFi command wins.
 
 ### WiFi File Server + Browser Terminal
 

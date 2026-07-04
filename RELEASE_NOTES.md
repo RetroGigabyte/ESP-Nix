@@ -1,4 +1,4 @@
-# ESP-Nix v0.7.0
+# ESP-Nix v0.7.1
 
 A declarative, Unix-like shell operating system for the ESP32 — built from scratch on FreeRTOS, running entirely off an I2C LCD and a serial console (with optional SD card, PS/2 keyboard, and WiFi).
 
@@ -24,6 +24,7 @@ A declarative, Unix-like shell operating system for the ESP32 — built from scr
 - `web` — WiFi file server (drag-and-drop upload/download) **and** a browser-based terminal, reachable from any phone or computer, running through the exact same shell processing as Serial/PS2
 - `web -join`/`-list` — scan and join real WPA2 networks
 - `ntp`/`settz` — WiFi time sync with named-timezone lookup and automatic US DST handling
+- `wifi connect`/`disconnect`/`status`, `ip`, `ping` — a persistent WiFi connection independent of `web`'s connect-then-disconnect lifecycle, so the shell can check status, IP, and host reachability at will
 - OTA updates via `update`, with pre-flight validation (size and firmware-header checks) before touching flash
 
 ## Editor & Extras

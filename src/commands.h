@@ -12,6 +12,7 @@
 #include "webfileserver.h"
 #include "otaupdate.h"
 #include "archive.h"
+#include <ESP32Ping.h>
 
 class Commands {
 private:
@@ -61,7 +62,8 @@ public:
       "help", "ls", "pwd", "cd", "cat", "echo", "touch", "rm", "cp", "mv",
       "grep", "head", "tail", "mkdir", "clear", "edit", "env", "uname",
       "whoami", "date", "df", "free", "nixos-rebuild", "webserver", "update",
-      "find", "wc", "du", "reboot", "ntp", "extract", "compress", "test", "settz", "nixfetch", "loop", "exit"
+      "find", "wc", "du", "reboot", "ntp", "extract", "compress", "test", "settz", "nixfetch", "loop",
+      "wifi", "ip", "ping", "exit"
     };
     return names;
   }
@@ -140,6 +142,9 @@ private:
     if (cmd == "settz") return cmdSetTz(args);
     if (cmd == "nixfetch") return cmdNixfetch(args);
     if (cmd == "loop") return cmdLoop(args);
+    if (cmd == "wifi") return cmdWifi(args);
+    if (cmd == "ip") return cmdIp(args);
+    if (cmd == "ping") return cmdPing(args);
     if (cmd == "exit") return cmdExit(args);
 
     return tryRunSystemScript(cmd, args);
@@ -301,6 +306,105 @@ private:
     persistWifiCredentials(ssid, password);
 
     term.println("Saved - future 'web' runs will join this network automatically.");
+    return true;
+  }
+
+  // 'wifi connect'/'disconnect'/'status' - unlike web/web -join/ntp (which
+  // connect, do one thing, and explicitly power the radio off again),
+  // this holds the connection in the background so wifi/ip/ping actually
+  // have something to report between commands.
+  bool cmdWifi(const std::vector<String>& args) {
+    if (args.size() < 2 || args[1] == "status") {
+      return wifiStatus();
+    }
+    if (args[1] == "connect") {
+      return wifiConnectPersistent(args);
+    }
+    if (args[1] == "disconnect") {
+      WiFi.disconnect(true);
+      WiFi.mode(WIFI_OFF);
+      term.println("WiFi disconnected.");
+      return true;
+    }
+    term.println("Usage: wifi status | wifi connect [ssid] [password] | wifi disconnect");
+    return true;
+  }
+
+  bool wifiStatus() {
+    if (WiFi.status() != WL_CONNECTED) {
+      term.println("WiFi is off (run 'wifi connect' first)");
+      return true;
+    }
+    out("SSID: " + WiFi.SSID());
+    out("IP: " + WiFi.localIP().toString());
+    out("RSSI: " + String(WiFi.RSSI()) + "dBm");
+    out("MAC: " + WiFi.macAddress());
+    return true;
+  }
+
+  bool wifiConnectPersistent(const std::vector<String>& args) {
+    String ssid, password;
+
+    if (args.size() >= 3) {
+      ssid = args[2];
+      password = args.size() >= 4 ? args[3] : "";
+    } else if (vars && vars->exists("WIFI_SSID")) {
+      ssid = vars->get("WIFI_SSID");
+      password = vars->exists("WIFI_PASS") ? vars->get("WIFI_PASS") : "";
+    } else {
+      term.println("No saved network - use 'wifi connect <ssid> <password>' or run 'web -join' first.");
+      return true;
+    }
+
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid.c_str(), password.c_str());
+
+    term.println("Joining " + ssid + " ...");
+    unsigned long start = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
+      delay(250);
+    }
+
+    if (WiFi.status() != WL_CONNECTED) {
+      term.println("Failed to join WiFi network: " + ssid);
+      WiFi.disconnect(true);
+      WiFi.mode(WIFI_OFF);
+      return true;
+    }
+
+    term.println("Joined " + ssid + " - IP: " + WiFi.localIP().toString());
+    term.println("WiFi stays connected in the background - use 'wifi disconnect' to stop.");
+    return true;
+  }
+
+  bool cmdIp(const std::vector<String>& args) {
+    if (WiFi.status() != WL_CONNECTED) {
+      term.println("WiFi is off (run 'wifi connect' first)");
+      return true;
+    }
+    out(WiFi.localIP().toString());
+    return true;
+  }
+
+  bool cmdPing(const std::vector<String>& args) {
+    if (args.size() < 2) {
+      term.println("Usage: ping <host>");
+      return true;
+    }
+    if (WiFi.status() != WL_CONNECTED) {
+      term.println("WiFi is off (run 'wifi connect' first)");
+      return true;
+    }
+
+    String host = args[1];
+    term.println("Pinging " + host + " ...");
+
+    bool ok = Ping.ping(host.c_str(), 4);
+    if (ok) {
+      out("Reply from " + host + ": avg " + String(Ping.averageTime(), 1) + "ms");
+    } else {
+      out("No reply from " + host);
+    }
     return true;
   }
 
@@ -716,7 +820,7 @@ private:
   }
 
   bool cmdHelp(const std::vector<String>& args) {
-    out("ESP-Nix 0.7.0 - Available commands:");
+    out("ESP-Nix 0.7.1 - Available commands:");
     out("  help        - Show this help");
     out("  ls [-l] [path] - List directory (-l for permissions/size/date)");
     out("  pwd         - Print working directory");
@@ -761,6 +865,9 @@ private:
     out("  settz <name>  - Set TZ_OFFSET by timezone name (settz -list)");
     out("  nixfetch      - System summary with a logo (edit /etc/settings/logo.txt)");
     out("  loop <count|inf> [-i secs] <cmd...> - Repeat a command (any key stops it)");
+    out("  wifi status|connect|disconnect - Persistent WiFi connection (stays up between commands)");
+    out("  ip            - Show current IP address");
+    out("  ping <host>   - Ping a host (requires 'wifi connect' first)");
     out("  cat /proc/{version,uptime,meminfo,cpuinfo} - Virtual system info");
     out("  /system/*.sh files run anywhere by name (no ./ or .sh)");
     return true;
@@ -854,7 +961,7 @@ private:
   // info as readable pseudo-files rather than only via commands.
   bool getProcContent(const String& path, String& content) {
     if (path == "/proc/version") {
-      content = "ESP-Nix version 0.7.0 (FreeRTOS) Xtensa\n";
+      content = "ESP-Nix version 0.7.1 (FreeRTOS) Xtensa\n";
       return true;
     }
     if (path == "/proc/uptime") {
@@ -1020,7 +1127,7 @@ private:
   }
 
   bool cmdUname(const std::vector<String>& args) {
-    out("ESP-Nix 0.7.0");
+    out("ESP-Nix 0.7.1");
     out("System: ESP32 WROOM32E");
     out("Arch: Xtensa");
     out("Kernel: FreeRTOS");
@@ -1072,7 +1179,7 @@ private:
     std::vector<String> info;
     info.push_back("root@esp-nix");
     info.push_back("------------");
-    info.push_back("OS: ESP-Nix 0.7.0");
+    info.push_back("OS: ESP-Nix 0.7.1");
     info.push_back("Host: ESP32 WROOM32E");
     info.push_back("Kernel: FreeRTOS");
     info.push_back("Uptime: " + formatUptime(millis() / 1000));
