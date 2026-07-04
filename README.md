@@ -3,6 +3,7 @@
 ![ESP-Nix logo](ESP_NIX.png)
 
 A minimal declarative operating system for ESP32 with a Unix-like shell interface.
+> **AI Disclaimer:** This project was developed with the assistance of Claude AI. I believe AI-written code should be open source to benefit Everyone and maintain transparency.
 
 ## Features
 
