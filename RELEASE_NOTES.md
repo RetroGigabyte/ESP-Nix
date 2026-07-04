@@ -45,6 +45,10 @@ v0.8.0 switched from the default two 1.25MB OTA slots to a single 3MB app partit
 
 v0.8.3 fixes this with `min_spiffs.csv` — two real 1.875MB OTA slots (up from the default's 1.25MB, and with real fallback safety this time), LittleFS at 128KB. Full details, including why the first attempt failed, in the README's "Partition Layout" section.
 
+## Bug Fix (v0.8.3): mkdir + ls on SD card
+
+`mkdir` on the SD card would report success, and `cd` into the new directory would confirm it genuinely existed - but a bare `ls` in that same directory wouldn't show it. Root cause: the shell's current-directory string always carries a trailing slash (e.g. `/sd/etc/`), and `SD_MMC`'s VFS layer doesn't reliably enumerate a directory opened with one present, even though `exists()`/`isDir()` (what `cd` uses) tolerate it fine. Fixed by normalizing trailing slashes out of every path in `FileSystem::stripSd()` - the single choke point all file operations already route through, so this fixes it everywhere at once rather than just in `ls`.
+
 ## Hardware
 - ESP32 (required)
 - I2C LCD1602 and SD card (via SD_MMC) — both recommended, not required. The shell works entirely over Serial/browser terminal without the LCD, and without SD the system just runs off internal LittleFS — you'd just lose `web`, `extract`/`compress` of large archives, and general extra storage.
