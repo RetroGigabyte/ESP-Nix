@@ -61,7 +61,7 @@ public:
       "help", "ls", "pwd", "cd", "cat", "echo", "touch", "rm", "cp", "mv",
       "grep", "head", "tail", "mkdir", "clear", "edit", "env", "uname",
       "whoami", "date", "df", "free", "nixos-rebuild", "webserver", "update",
-      "find", "wc", "du", "reboot", "ntp", "extract", "compress", "test", "settz", "nixfetch", "exit"
+      "find", "wc", "du", "reboot", "ntp", "extract", "compress", "test", "settz", "nixfetch", "loop", "exit"
     };
     return names;
   }
@@ -139,6 +139,7 @@ private:
     if (cmd == "test" || cmd == "[") return cmdTest(args);
     if (cmd == "settz") return cmdSetTz(args);
     if (cmd == "nixfetch") return cmdNixfetch(args);
+    if (cmd == "loop") return cmdLoop(args);
     if (cmd == "exit") return cmdExit(args);
 
     return tryRunSystemScript(cmd, args);
@@ -715,7 +716,7 @@ private:
   }
 
   bool cmdHelp(const std::vector<String>& args) {
-    out("ESP-Nix 0.6.9 - Available commands:");
+    out("ESP-Nix 0.7.0 - Available commands:");
     out("  help        - Show this help");
     out("  ls [-l] [path] - List directory (-l for permissions/size/date)");
     out("  pwd         - Print working directory");
@@ -759,6 +760,7 @@ private:
     out("  test/[ EXPR ] - -e/-f/-d exists/file/dir, =/!=, -eq/-ne/-lt/-gt");
     out("  settz <name>  - Set TZ_OFFSET by timezone name (settz -list)");
     out("  nixfetch      - System summary with a logo (edit /etc/settings/logo.txt)");
+    out("  loop <count|inf> [-i secs] <cmd...> - Repeat a command (any key stops it)");
     out("  cat /proc/{version,uptime,meminfo,cpuinfo} - Virtual system info");
     out("  /system/*.sh files run anywhere by name (no ./ or .sh)");
     return true;
@@ -852,7 +854,7 @@ private:
   // info as readable pseudo-files rather than only via commands.
   bool getProcContent(const String& path, String& content) {
     if (path == "/proc/version") {
-      content = "ESP-Nix version 0.6.9 (FreeRTOS) Xtensa\n";
+      content = "ESP-Nix version 0.7.0 (FreeRTOS) Xtensa\n";
       return true;
     }
     if (path == "/proc/uptime") {
@@ -1018,7 +1020,7 @@ private:
   }
 
   bool cmdUname(const std::vector<String>& args) {
-    out("ESP-Nix 0.6.9");
+    out("ESP-Nix 0.7.0");
     out("System: ESP32 WROOM32E");
     out("Arch: Xtensa");
     out("Kernel: FreeRTOS");
@@ -1070,7 +1072,7 @@ private:
     std::vector<String> info;
     info.push_back("root@esp-nix");
     info.push_back("------------");
-    info.push_back("OS: ESP-Nix 0.6.9");
+    info.push_back("OS: ESP-Nix 0.7.0");
     info.push_back("Host: ESP32 WROOM32E");
     info.push_back("Kernel: FreeRTOS");
     info.push_back("Uptime: " + formatUptime(millis() / 1000));
@@ -1731,6 +1733,59 @@ private:
   bool cmdExit(const std::vector<String>& args) {
     term.println("Bye!");
     return false;
+  }
+
+  // loop <count|inf> [-i seconds] <command...> - repeats a command since
+  // the script engine has no real loop construct (no if/for, just a flat
+  // command sequence). Any keypress stops it early, even mid-wait.
+  bool cmdLoop(const std::vector<String>& args) {
+    if (args.size() < 3) {
+      term.println("Usage: loop <count|inf> [-i seconds] <command...>");
+      return true;
+    }
+
+    bool infinite = (args[1] == "inf");
+    long count = infinite ? 0 : args[1].toInt();
+
+    size_t cmdStart = 2;
+    unsigned long intervalMs = 0;
+    if (args.size() > 3 && args[2] == "-i") {
+      intervalMs = (unsigned long)args[3].toInt() * 1000;
+      cmdStart = 4;
+    }
+
+    if (cmdStart >= args.size()) {
+      term.println("Usage: loop <count|inf> [-i seconds] <command...>");
+      return true;
+    }
+
+    String cmdLine = "";
+    for (size_t i = cmdStart; i < args.size(); i++) {
+      if (i > cmdStart) cmdLine += " ";
+      cmdLine += args[i];
+    }
+
+    // Always wait a little between iterations, both to keep this
+    // interruptible and to avoid spamming the terminal instantly - use
+    // the -i interval if given, otherwise 1 second by default.
+    unsigned long waitMs = intervalMs > 0 ? intervalMs : 1000;
+
+    long i = 0;
+    while (infinite || i < count) {
+      if (fullExecutor) fullExecutor(cmdLine); else execute(cmdLine);
+      i++;
+
+      unsigned long start = millis();
+      while (millis() - start < waitMs) {
+        if (input.available()) {
+          input.read();
+          term.println("Loop stopped.");
+          return true;
+        }
+        delay(10);
+      }
+    }
+    return true;
   }
 
   // POSIX-style test/[ builtin, mainly useful with && / || for basic

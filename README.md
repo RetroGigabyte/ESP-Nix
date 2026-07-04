@@ -27,6 +27,7 @@ A minimal declarative operating system for ESP32 with a Unix-like shell interfac
 - **Cursor-aware editor**: arrow keys move within a line for mid-line edits; `:d<n>`/`:i<n>` delete or insert by line number
 - **Archive support**: `extract`/`compress` handle real `.zip` plus `.tar.gz`/`.tgz`/`.gz`/`.tar`
 - **`nixfetch`**: a neofetch-style system summary — logo plus live stats (uptime, memory, disk, CPU) side by side, logo customizable via `/etc/settings/logo.txt`
+- **`loop`**: repeats a command a fixed number of times or indefinitely, since the script engine has no real loop construct
 
 ## Hardware
 
@@ -81,7 +82,7 @@ After booting, you'll see the shell prompt:
 
 ```
 nix:/$ help
-ESP-Nix 0.6.9 - Available commands:
+ESP-Nix 0.7.0 - Available commands:
   help        - Show this help
   ls [path]   - List directory
   pwd         - Print working directory
@@ -113,7 +114,7 @@ ESP-Nix 0.6.9 - Available commands:
 
 ```bash
 nix:/$ uname
-ESP-Nix 0.6.9
+ESP-Nix 0.7.0
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -154,7 +155,7 @@ A declarative OS for ESP32.
 nix:/$ uname > sysinfo.txt
 nix:/$ echo "more info" >> sysinfo.txt
 nix:/$ cat sysinfo.txt
-ESP-Nix 0.6.9
+ESP-Nix 0.7.0
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -384,7 +385,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 0.6.9
+  |:_/ |         OS: ESP-Nix 0.7.0
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -396,6 +397,25 @@ nix:/$ nixfetch
 ```
 
 The logo isn't compiled into firmware — it's read live from `/etc/settings/logo.txt` (auto-created with a small default penguin on first boot), so replacing it is just `edit /etc/settings/logo.txt`, no rebuild required.
+
+### loop
+
+Repeats a command, since the script engine has no real loop construct (no `if`/`for` — just a flat sequence of commands):
+
+```bash
+nix:/$ loop 3 echo hi
+hi
+hi
+hi
+
+nix:/$ loop inf -i 5 date
+7/3/2027 3:04:05 PM
+7/3/2027 3:04:10 PM
+7/3/2027 3:04:15 PM
+Loop stopped.
+```
+
+`loop <count|inf> [-i seconds] <command...>` — run a fixed number of times, or `inf` until stopped. `-i seconds` sets the delay between runs (default 1 second). Any keypress stops it immediately, even mid-wait.
 
 ### WiFi File Server + Browser Terminal
 
