@@ -1,4 +1,4 @@
-# ESP-Nix v0.9.0
+# ESP-Nix v0.9.1
 
 A declarative, Unix-like shell operating system for the ESP32 — built from scratch on FreeRTOS, running entirely off an I2C LCD and a serial console (with optional SD card, PS/2 keyboard, and WiFi).
 
@@ -42,24 +42,25 @@ A declarative, Unix-like shell operating system for the ESP32 — built from scr
 - `PATH` — script directories (like `/system`) are now configurable, colon-separated, checked in order
 - Shell prompt now shows the current user and hostname (`root@esp-nix:/$`), reading from `USER`/`HOSTNAME` variables rather than hardcoded strings - same for `whoami`. First piece of an eventual accounts/permissions framework; still one user, nothing access-controlled yet
 - `hostname [-v] | hostname -s <name>` - shows/sets `HOSTNAME`, also applied as the real WiFi hostname on next connect (`WiFi.setHostname()`/`softAPsetHostname()`)
+- `backup -m|-l|-r#` - backs up internal LittleFS ("user space") to `/sd/backups` as `hostname-YYYYMMDD-HHMMSS.esp_bak`, lists backups numbered, restores by number. Internally just zip archives with a renamed extension (format dispatch keys off the archive path's extension)
 - `sleep <seconds>` — pauses, interruptible by any keypress
 - `web`'s file manager now zips folders on the fly for download, and shows a `nixfetch` snapshot taken when `web` starts
 
-## Partition Layout Change (v0.8.0) — and Fix (v0.9.0)
+## Partition Layout Change (v0.8.0) — and Fix (v0.9.1)
 
 v0.8.0 switched from the default two 1.25MB OTA slots to a single 3MB app partition (`huge_app.csv`), to recover flash headroom after HTTPS support ate into it. **This turned out to be broken, not just less safe.** A single `app0` doesn't just drop the OTA rollback fallback - it breaks `update`/OTA outright: the Arduino `Update` library needs a genuinely separate partition to write a new image into while the current one keeps executing, and with only one slot, `Update.begin()` ends up overwriting the flash pages the CPU is actively running from, crashing with `abort()` the moment it happens. Confirmed live: `update`-ing to v0.8.1 crashed at 0% and rebooted back into the previously-running v0.8.0 (no data lost, but OTA was non-functional the whole time).
 
-v0.9.0 fixes this with `min_spiffs.csv` — two real 1.875MB OTA slots (up from the default's 1.25MB, and with real fallback safety this time), LittleFS at 128KB. Full details, including why the first attempt failed, in the README's "Partition Layout" section.
+v0.9.1 fixes this with `min_spiffs.csv` — two real 1.875MB OTA slots (up from the default's 1.25MB, and with real fallback safety this time), LittleFS at 128KB. Full details, including why the first attempt failed, in the README's "Partition Layout" section.
 
-## Bug Fix (v0.9.0): mkdir + ls on SD card
+## Bug Fix (v0.9.1): mkdir + ls on SD card
 
 `mkdir` on the SD card would report success, and `cd` into the new directory would confirm it genuinely existed - but a bare `ls` in that same directory wouldn't show it. Root cause: the shell's current-directory string always carries a trailing slash (e.g. `/sd/etc/`), and `SD_MMC`'s VFS layer doesn't reliably enumerate a directory opened with one present, even though `exists()`/`isDir()` (what `cd` uses) tolerate it fine. Fixed by normalizing trailing slashes out of every path in `FileSystem::stripSd()` - the single choke point all file operations already route through, so this fixes it everywhere at once rather than just in `ls`.
 
-## Bug Fix (v0.9.0): mv/cp with multiple glob matches to a non-existent destination
+## Bug Fix (v0.9.1): mv/cp with multiple glob matches to a non-existent destination
 
 `mv *.retro retron` (destination folder not yet created) silently clobbered every matched file onto the same literal path one after another, instead of erroring or creating a folder - `resolveDestPath()` only treated the destination as a directory if it *already* existed as one. Fixed in `cmdCp`/`cmdMv`: when a glob expands to more than one source file and the destination doesn't already exist as a directory, it's auto-created as one first, so each file lands inside it under its own name instead of overwriting the last.
 
-## Bug Fix (v0.9.0): nixfetch (and any single unpiped command) printed to the console instead of the web page
+## Bug Fix (v0.9.1): nixfetch (and any single unpiped command) printed to the console instead of the web page
 
 The `nixfetch` snapshot on `web`'s file manager page rendered as an empty `<pre></pre>` - the text itself printed correctly to the physical Serial console instead. Root cause: `Shell::executePipeline()` unconditionally set the shared capture buffer to `nullptr` for any pipeline stage that doesn't need its own local capture (`needsCapture = false` - true for any single command with no pipe or redirect, like a bare `nixfetch`). That clobbered the *outer* capture buffer the browser terminal's executor had already set up before calling into the shell, so `out()` fell through to the real terminal instead of the caller's buffer. Fixed by only touching the capture buffer when a stage actually needs one, leaving an outer caller's context untouched otherwise.
 

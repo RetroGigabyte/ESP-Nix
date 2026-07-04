@@ -34,6 +34,7 @@ A minimal declarative operating system for ESP32 with a Unix-like shell interfac
 - **`retron`**: runs [Retron](https://github.com/RetroGigabyte/Retron) scripts — real variables, `if`/`loop`/functions, `INPUT`/`OPEN`/`READ`/`WRITE`/`LOAD`/`QUIT`, genuinely new logic beyond what `/system`/`/boot` scripts can sequence
 - **`PATH`**: `/system`-style script directories now configurable (colon-separated) in `/etc/settings/esp-nix.conf`, checked in order for a matching command
 - **`sleep <seconds>`**: pauses, interruptible by any keypress
+- **`backup -m/-l/-r#`**: backs up internal storage to `/sd/backups` as `hostname-timestamp.esp_bak`, lists backups numbered, restores by number
 - **Folder downloads + `nixfetch` on the web page**: `web`'s file manager zips folders on the fly for download, and shows a `nixfetch` snapshot taken when `web` starts
 
 ## Hardware
@@ -89,7 +90,7 @@ After booting, you'll see the shell prompt:
 
 ```
 root@nix:/$ help
-ESP-Nix 0.9.0 - Available commands:
+ESP-Nix 0.9.1 - Available commands:
   help        - Show this help
   ls [path]   - List directory
   pwd         - Print working directory
@@ -121,7 +122,7 @@ ESP-Nix 0.9.0 - Available commands:
 
 ```bash
 nix:/$ uname
-ESP-Nix 0.9.0
+ESP-Nix 0.9.1
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -162,7 +163,7 @@ A declarative OS for ESP32.
 nix:/$ uname > sysinfo.txt
 nix:/$ echo "more info" >> sysinfo.txt
 nix:/$ cat sysinfo.txt
-ESP-Nix 0.9.0
+ESP-Nix 0.9.1
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -192,7 +193,7 @@ nix:/$ rm -r /data/system-backup-2
 
 Both also accept a glob in the source: `mv cool.* sd` moves every file starting with `cool.` into `/sd`. Supported patterns are `*.txt`, `cool.*`, `*cool*`, and `*` — same matching `find` uses.
 
-If a glob matches more than one file and the destination doesn't exist yet, it's auto-created as a directory so each match gets its own name inside it — e.g. `mv *.retro retron` creates `retron/` and moves every script into it. (Fixed in v0.9.0 — previously, multiple matches with a not-yet-existing destination all landed on the same literal path and clobbered each other.)
+If a glob matches more than one file and the destination doesn't exist yet, it's auto-created as a directory so each match gets its own name inside it — e.g. `mv *.retro retron` creates `retron/` and moves every script into it. (Fixed in v0.9.1 — previously, multiple matches with a not-yet-existing destination all landed on the same literal path and clobbered each other.)
 
 ### find, wc, du
 
@@ -239,7 +240,7 @@ SD          7580MB  12MB  7568MB      0%
 
 If no card is inserted, `/sd` simply doesn't appear in `ls /` and boot proceeds normally — the SD card is entirely optional.
 
-**Fixed bug (v0.9.0): `mkdir` on the SD card, followed by a bare `ls` in the same directory, wouldn't show the new folder** even though it genuinely existed (confirmed via `cd` into it directly). Root cause: the shell's current-directory path always carries a trailing slash (e.g. `/sd/etc/`), and `SD_MMC`'s VFS layer doesn't reliably open a directory for *listing* with a trailing slash present, even though `exists()`/`isDir()` (used by `cd`) tolerate it fine. Fixed by normalizing trailing slashes out of every path before it reaches the underlying filesystem, in `FileSystem::stripSd()` - the one place all file operations already route through.
+**Fixed bug (v0.9.1): `mkdir` on the SD card, followed by a bare `ls` in the same directory, wouldn't show the new folder** even though it genuinely existed (confirmed via `cd` into it directly). Root cause: the shell's current-directory path always carries a trailing slash (e.g. `/sd/etc/`), and `SD_MMC`'s VFS layer doesn't reliably open a directory for *listing* with a trailing slash present, even though `exists()`/`isDir()` (used by `cd`) tolerate it fine. Fixed by normalizing trailing slashes out of every path before it reaches the underlying filesystem, in `FileSystem::stripSd()` - the one place all file operations already route through.
 
 ### Editor: Line Editing
 
@@ -404,7 +405,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 0.9.0
+  |:_/ |         OS: ESP-Nix 0.9.1
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -518,6 +519,28 @@ Pauses for a fixed number of seconds, interruptible by any keypress:
 ```bash
 nix:/$ sleep 5
 ```
+
+### backup
+
+Backs up internal LittleFS ("user space" — `/etc/settings`, `/boot`, `/system`, `/data`, everything that isn't part of the compiled firmware itself) to the SD card as `hostname-YYYYMMDD-HHMMSS.esp_bak`:
+
+```bash
+nix:/$ backup -m
+Backup created: /sd/backups/esp-nix-20260704-093015.esp_bak
+
+nix:/$ backup -l
+1) esp-nix-20260704-093015.esp_bak
+2) esp-nix-20260705-141022.esp_bak
+
+nix:/$ backup -r 1
+Restored esp-nix-20260704-093015.esp_bak - run 'nixos-rebuild' or reboot to reload config into the running shell.
+```
+
+`backup -m` makes a new backup; `backup -l` lists existing ones, numbered; `backup -r <#>` restores the numbered backup, overwriting current internal storage. Requires an SD card.
+
+**Under the hood, `.esp_bak` files are just zip archives with a different extension** — `backup` compresses to a temp `.zip` via the same `Archiver` `extract`/`compress` use, then renames it, since the internal format-dispatch logic keys off the file extension. Restoring reverses that (copies the `.esp_bak` to a temp `.zip`, extracts it, cleans up), so a `.esp_bak` file can also just be renamed to `.zip` and opened normally if you ever need to inspect one by hand.
+
+**Restoring doesn't automatically reload the running shell's state** — variables like `WIFI_SSID`/`HOSTNAME` that were already read into memory at boot won't pick up the restored config until you run `nixos-rebuild` or reboot.
 
 ### wifi, ip, ping
 

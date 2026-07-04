@@ -66,7 +66,7 @@ public:
       "grep", "head", "tail", "mkdir", "clear", "edit", "env", "uname",
       "whoami", "date", "df", "free", "nixos-rebuild", "webserver", "update",
       "find", "wc", "du", "reboot", "ntp", "extract", "compress", "test", "settz", "nixfetch", "loop",
-      "wifi", "ip", "ping", "curl", "retron", "sleep", "hostname", "exit"
+      "wifi", "ip", "ping", "curl", "retron", "sleep", "hostname", "backup", "exit"
     };
     return names;
   }
@@ -152,6 +152,7 @@ private:
     if (cmd == "retron") return cmdRetron(args);
     if (cmd == "sleep") return cmdSleep(args);
     if (cmd == "hostname") return cmdHostname(args);
+    if (cmd == "backup") return cmdBackup(args);
     if (cmd == "exit") return cmdExit(args);
 
     return tryRunSystemScript(cmd, args);
@@ -968,7 +969,7 @@ private:
   }
 
   bool cmdHelp(const std::vector<String>& args) {
-    out("ESP-Nix 0.9.0 - Available commands:");
+    out("ESP-Nix 0.9.1 - Available commands:");
     out("  help        - Show this help");
     out("  ls [-l] [path] - List directory (-l for permissions/size/date)");
     out("  pwd         - Print working directory");
@@ -1020,6 +1021,7 @@ private:
     out("  retron <file.retro> - Run a Retron language script (variables/loops/if)");
     out("  sleep <seconds> - Pause (any key interrupts)");
     out("  hostname [-v] | hostname -s <name> - Show/set hostname (prompt + WiFi)");
+    out("  backup -m|-l|-r# - Back up/list/restore internal storage to/from SD");
     out("  cat /proc/{version,uptime,meminfo,cpuinfo} - Virtual system info");
     out("  /system/*.sh files run anywhere by name (no ./ or .sh)");
     return true;
@@ -1113,7 +1115,7 @@ private:
   // info as readable pseudo-files rather than only via commands.
   bool getProcContent(const String& path, String& content) {
     if (path == "/proc/version") {
-      content = "ESP-Nix version 0.9.0 (FreeRTOS) Xtensa\n";
+      content = "ESP-Nix version 0.9.1 (FreeRTOS) Xtensa\n";
       return true;
     }
     if (path == "/proc/uptime") {
@@ -1279,7 +1281,7 @@ private:
   }
 
   bool cmdUname(const std::vector<String>& args) {
-    out("ESP-Nix 0.9.0");
+    out("ESP-Nix 0.9.1");
     out("System: ESP32 WROOM32E");
     out("Arch: Xtensa");
     out("Kernel: FreeRTOS");
@@ -1331,7 +1333,7 @@ private:
     std::vector<String> info;
     info.push_back("root@esp-nix");
     info.push_back("------------");
-    info.push_back("OS: ESP-Nix 0.9.0");
+    info.push_back("OS: ESP-Nix 0.9.1");
     info.push_back("Host: ESP32 WROOM32E");
     info.push_back("Kernel: FreeRTOS");
     info.push_back("Uptime: " + formatUptime(millis() / 1000));
@@ -1484,7 +1486,7 @@ private:
   // when the destination was just auto-created by cmdCp/cmdMv (for a
   // multi-match glob), re-querying fs.exists()/isDir() immediately
   // afterward isn't reliable on SD_MMC - the same class of VFS quirk
-  // fixed for 'ls' in stripSd() (see v0.9.0's mkdir+ls bug fix).
+  // fixed for 'ls' in stripSd() (see v0.9.1's mkdir+ls bug fix).
   String resolveDestPath(const String& srcPath, const String& destPath, bool destIsDir) {
     if (destIsDir) {
       String base = srcPath;
@@ -2043,6 +2045,134 @@ private:
   // command sequence). Any keypress stops it early, even mid-wait.
   // sleep <seconds> - pauses, interruptible by any keypress (same pattern
   // as loop's between-iteration wait).
+  // Copies a file byte-for-byte via openRaw(), safe for binary content
+  // (zip archives) unlike readFile()/writeFile()'s String-based path.
+  bool binaryCopy(const String& srcPath, const String& destPath) {
+    File src = fs.openRaw(srcPath);
+    if (!src) return false;
+    File dest = fs.openRaw(destPath, "w");
+    if (!dest) { src.close(); return false; }
+
+    uint8_t buf[512];
+    size_t n;
+    while ((n = src.read(buf, sizeof(buf))) > 0) {
+      dest.write(buf, n);
+    }
+    src.close();
+    dest.close();
+    return true;
+  }
+
+  // Backup filenames sort correctly by name already (YYYYMMDD-HHMMSS),
+  // so a plain alphabetical sort doubles as chronological order.
+  std::vector<String> listBackups() {
+    std::vector<String> result;
+    for (const auto& name : fs.listDir("/sd/backups")) {
+      if (name.endsWith(".esp_bak")) result.push_back(name);
+    }
+    std::sort(result.begin(), result.end());
+    return result;
+  }
+
+  // backup -m|-l|-r# - backs up internal LittleFS ("user space" - config,
+  // boot/system scripts, history, everything not part of the compiled
+  // firmware itself) to /sd/backups as hostname-YYYYMMDD-HHMMSS.esp_bak.
+  // Internally these are just zip files; the extension is renamed after
+  // compression (and back before extraction) since Archiver dispatches
+  // format by the archive path's extension, not its actual content.
+  bool cmdBackup(const std::vector<String>& args) {
+    if (args.size() < 2) {
+      term.println("Usage: backup -m (make) | backup -l (list) | backup -r <#> (restore)");
+      return true;
+    }
+
+    if (!fs.sdAvailable()) {
+      term.println("No SD card mounted - insert one and reboot first.");
+      return true;
+    }
+
+    if (!fs.exists("/sd/backups")) fs.createDir("/sd/backups");
+
+    if (args[1] == "-m") {
+      String hostname = (vars && vars->exists("HOSTNAME")) ? vars->get("HOSTNAME") : "esp-nix";
+      long tzOffset = (vars && vars->exists("TZ_OFFSET")) ? vars->get("TZ_OFFSET").toInt() : 0;
+      time_t localEpoch = time(nullptr) + tzOffset;
+      struct tm* t = gmtime(&localEpoch);
+
+      char stamp[20];
+      snprintf(stamp, sizeof(stamp), "%04d%02d%02d-%02d%02d%02d",
+               t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec);
+
+      String finalPath = "/sd/backups/" + hostname + "-" + String(stamp) + ".esp_bak";
+      String tempZip = "/sd/backups/.tmp_backup.zip";
+
+      Archiver archiver;
+      if (!archiver.compress(fs, term, "/", tempZip)) {
+        term.println("Backup failed.");
+        return true;
+      }
+
+      if (!binaryCopy(tempZip, finalPath)) {
+        term.println("Backup failed: could not finalize " + finalPath);
+        fs.deleteFile(tempZip);
+        return true;
+      }
+      fs.deleteFile(tempZip);
+
+      term.println("Backup created: " + finalPath);
+      return true;
+    }
+
+    if (args[1] == "-l") {
+      std::vector<String> backups = listBackups();
+      if (backups.empty()) {
+        term.println("No backups found in /sd/backups.");
+        return true;
+      }
+      for (size_t i = 0; i < backups.size(); i++) {
+        out(String(i + 1) + ") " + backups[i]);
+      }
+      return true;
+    }
+
+    if (args[1] == "-r") {
+      if (args.size() < 3) {
+        term.println("Usage: backup -r <#>  (see 'backup -l' for numbers)");
+        return true;
+      }
+
+      std::vector<String> backups = listBackups();
+      int index = args[2].toInt();
+      if (index < 1 || index > (int)backups.size()) {
+        term.println("Invalid backup number - run 'backup -l' first.");
+        return true;
+      }
+
+      String backupPath = "/sd/backups/" + backups[index - 1];
+      String tempZip = "/sd/backups/.tmp_restore.zip";
+
+      if (!binaryCopy(backupPath, tempZip)) {
+        term.println("Restore failed: could not read " + backupPath);
+        return true;
+      }
+
+      Archiver archiver;
+      bool ok = archiver.extract(fs, term, tempZip, "/");
+      fs.deleteFile(tempZip);
+
+      if (!ok) {
+        term.println("Restore failed.");
+        return true;
+      }
+
+      term.println("Restored " + backups[index - 1] + " - run 'nixos-rebuild' or reboot to reload config into the running shell.");
+      return true;
+    }
+
+    term.println("Usage: backup -m (make) | backup -l (list) | backup -r <#> (restore)");
+    return true;
+  }
+
   bool cmdSleep(const std::vector<String>& args) {
     if (args.size() < 2) {
       term.println("Usage: sleep <seconds>");
