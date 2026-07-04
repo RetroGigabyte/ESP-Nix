@@ -8,7 +8,7 @@ A minimal declarative operating system for ESP32 with a Unix-like shell interfac
 ## Features
 
 - **Shell interpreter** with common Linux commands
-- **LittleFS file system** for persistent storage (1MB)  
+- **LittleFS file system** for persistent storage (896KB)  
 - **Serial terminal** access (115200 baud)
 - **LCD display** (16x2) for status output
 - **Essential commands**: ls, cd, pwd, cat, echo, rm, cp, mv, grep, head, tail, mkdir, touch, clear, uname, whoami, date, df, free, find, wc, du, reboot
@@ -85,7 +85,7 @@ After booting, you'll see the shell prompt:
 
 ```
 nix:/$ help
-ESP-Nix 0.7.3 - Available commands:
+ESP-Nix 0.8.0 - Available commands:
   help        - Show this help
   ls [path]   - List directory
   pwd         - Print working directory
@@ -117,7 +117,7 @@ ESP-Nix 0.7.3 - Available commands:
 
 ```bash
 nix:/$ uname
-ESP-Nix 0.7.3
+ESP-Nix 0.8.0
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -158,7 +158,7 @@ A declarative OS for ESP32.
 nix:/$ uname > sysinfo.txt
 nix:/$ echo "more info" >> sysinfo.txt
 nix:/$ cat sysinfo.txt
-ESP-Nix 0.7.3
+ESP-Nix 0.8.0
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -388,7 +388,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 0.7.3
+  |:_/ |         OS: ESP-Nix 0.8.0
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -465,6 +465,22 @@ nix:/$ curl -X POST -d "name=test" https://api.example.com/echo
 `curl [-X METHOD] [-d data] <url>` — defaults to `GET`; `-d` implies `POST` if no `-X` is given, matching real `curl`'s behavior. Needs `wifi connect` run first (or an active `web`/`ntp` session).
 
 **HTTPS doesn't validate certificates** (`WiFiClientSecure::setInsecure()`) — there's no certificate trust store on this device, so any HTTPS server is accepted without verifying its identity. Fine for hobby use and APIs you already trust; don't rely on it for anything security-sensitive. This also costs real flash: pulling in the TLS stack for HTTPS support added roughly 140KB to the firmware image (see version history if you need to check current headroom).
+
+### Partition Layout
+
+ESP-Nix uses a single 3MB app partition (`huge_app.csv`) instead of the ESP32 Arduino default's two 1.25MB OTA slots:
+
+| Partition | Type | Offset | Size |
+|---|---|---|---|
+| `nvs` | data (nvs) | `0x9000` | 20KB |
+| `otadata` | data (ota) | `0xe000` | 8KB |
+| `app0` | app (ota_0) | `0x10000` | 3MB |
+| `spiffs` (LittleFS) | data (spiffs) | `0x310000` | 896KB |
+| `coredump` | data | `0x3F0000` | 64KB |
+
+**Why:** the default scheme's two 1.25MB slots (for OTA rollback safety) left almost no headroom once HTTPS support and archive handling were added — down to about 74KB free. A single 3MB slot recovers most of that as usable space (currently ~1.87MB free), at the cost of the automatic OTA fallback: if a *passing* update (one that clears the existing size/magic-byte validation but turns out broken once running) gets flashed, there's no second slot to automatically fall back to — recovery means a USB reflash, not an automatic bounce-back. `update`/OTA itself still works exactly the same for routine updates; only that specific failure mode changes.
+
+**This is a one-time, USB-only migration.** Since it changes the partition table itself (not just what's inside a slot), it can't go through `update`/OTA — only `pio run -t upload`. It also moves and shrinks the LittleFS partition (1408KB → 896KB), which orphans whatever was stored there previously; everything on internal storage (WiFi credentials, `/etc/settings`, `/boot` scripts, history) resets to defaults on first boot after the switch. The SD card is untouched. Once migrated, `update`/OTA goes back to normal for all future firmware.
 
 ### Persistent Command History
 

@@ -1,4 +1,4 @@
-# ESP-Nix v0.7.3
+# ESP-Nix v0.8.0
 
 A declarative, Unix-like shell operating system for the ESP32 — built from scratch on FreeRTOS, running entirely off an I2C LCD and a serial console (with optional SD card, PS/2 keyboard, and WiFi).
 
@@ -36,6 +36,10 @@ A declarative, Unix-like shell operating system for the ESP32 — built from scr
 - Full line editor (`edit`) with mid-line cursor movement, line insert/delete, and Up/Down navigation between lines
 - `nixfetch` — a neofetch-style system summary with a customizable ASCII logo
 - `loop <count|inf> [-i seconds] <command...>` — repeats a command, since the script engine has no real loop construct; any keypress stops it early
+
+## Partition Layout Change (v0.8.0)
+
+Switched from the default two 1.25MB OTA slots to a single 3MB app partition (`huge_app.csv`) - down to ~74KB flash headroom after HTTPS support, now back up to ~1.87MB. Trade-off: no more automatic OTA rollback slot (a passing-but-broken update now needs a USB reflash to recover, instead of an automatic bootloader fallback); LittleFS also shrinks from 1408KB to 896KB. `update`/OTA itself keeps working normally for all routine updates going forward - this only affects that one failure mode, and only this one migration needs USB (it changes the partition table itself, which OTA can never touch). Full details in the README's "Partition Layout" section.
 
 ## Hardware
 - ESP32 (required)
