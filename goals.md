@@ -18,3 +18,13 @@ Output ESP-Nix over RCA composite video to a CRT, instead of (or alongside) the 
 **RAM budget (2026-07-03):** target resolution is 320×240 at ~16 colors (4 bits/pixel) = 38,400 bytes (~37.5KB) per framebuffer, or ~75KB double-buffered. Measured separately, `wifi`/`curl`/`ping` push heap usage up to ~109KB while actively connected (WiFi + TLS runtime buffers). Combined, that's already over half the ESP32's 320KB total RAM before the shell, LittleFS, or anything else runs — CRT output and heavy networking likely can't both run at full intensity simultaneously without real budgeting. Worth deciding up front whether video is single-buffered (accept some flicker, save ~37.5KB) or whether networking gets scaled back while video is active.
 
 **Flash budget (2026-07-03):** ESP-Nix is currently at 94.2% of the 1.3MB OTA partition (~70KB headroom), almost entirely from the HTTPS/TLS stack (`WiFiClientSecure`, ~140KB). The actual code size of `ESP32-WROM-32E-RCA-Graphics` (signal timing, DMA/RMT output, any font tables) hasn't been checked against this yet - do that first before assuming it fits. If it doesn't, dropping HTTPS from `curl` recovers ~140KB, which would likely be enough on its own - meaning it may come down to choosing between "talks to HTTPS APIs" and "drives a CRT" rather than having both.
+
+## Programs on SD (scripting VM)
+
+Real "install a program by dropping a file on the SD card" - not just config/data (already true for `/etc/settings`, `/boot`, `/system`, the web UI pages, the `nixfetch` logo) but genuinely new logic, without recompiling firmware.
+
+**Why this needs more than what exists today:** the ESP32 Arduino environment has no dynamic linker - there's no safe way to load arbitrary new compiled code from SD at runtime. `/system/*.sh` and `/boot/*.sh` already are "programs on SD" in the sense that they're interpreted, not compiled in, but they can only sequence *existing* built-in commands (`test`/`[`, `loop`, `&&`/`||`/`;`, pipes, redirection) - they can't introduce logic the shell doesn't already have a primitive for.
+
+**What it would take:** a small scripting language interpreter (a tiny Forth, a custom bytecode VM, something in that weight class) compiled into firmware once. After that, a "program" is a script/bytecode file on SD that the VM interprets - genuinely new behavior without ever touching firmware again.
+
+**Scope note:** this is a real build, comparable in size to the CRT project - not a quick add. Revisit when there's bandwidth for it specifically, likely after (or alongside) the CRT work rather than squeezed in as a side feature.
