@@ -28,3 +28,18 @@ Real "install a program by dropping a file on the SD card" - not just config/dat
 **What it would take:** a small scripting language interpreter (a tiny Forth, a custom bytecode VM, something in that weight class) compiled into firmware once. After that, a "program" is a script/bytecode file on SD that the VM interprets - genuinely new behavior without ever touching firmware again.
 
 **Scope note:** this is a real build, comparable in size to the CRT project - not a quick add. Revisit when there's bandwidth for it specifically, likely after (or alongside) the CRT work rather than squeezed in as a side feature.
+
+## Sensor/Actuator Commands (SunFounder kit)
+
+The recommended kit (see README) includes far more hardware than ESP-Nix currently touches. Full inventory as of 2026-07-03:
+
+- **Displays:** LED, RGB LED, 7-segment display, WS2812 RGB 8-LED strip (I2C LCD1602 already used)
+- **Sound:** buzzer, audio module + speaker
+- **Drivers:** DC motor, servo, centrifugal pump, L293D (motor driver), 74HC595 (shift register)
+- **Controllers/input:** button, tilt switch, potentiometer, joystick module, IR receiver
+- **Sensors:** photoresistor, thermistor, DHT11 (humidity/temperature), PIR motion sensor, line tracking module, soil moisture module, obstacle avoidance module, ultrasonic module
+- **Also in the kit:** ESP32 camera extension board, battery (see "Camera" note below and RAM/flash budget notes above)
+
+**Natural fit for ESP-Nix:** expose these as shell commands rather than one-off sketches - e.g. `sensor read dht11`, `gpio set <pin> <value>`, `servo <pin> <angle>` - consistent with everything else being a command you can script, pipe, or call from `/boot`/`/system`. Scope is much smaller per-component than CRT or the scripting VM (most of these are a single I2C/analog/digital read or write), so this could be tackled incrementally, one sensor/actuator at a time, rather than as one big project.
+
+**Not yet decided:** which specific sensors/actuators to wire up first - revisit when ready to pick one.

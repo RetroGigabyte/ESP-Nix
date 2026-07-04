@@ -209,11 +209,22 @@ private:
     return LittleFS;
   }
 
-  // Strips the /sd mount prefix so the backend sees its own root-relative path
+  // Strips the /sd mount prefix so the backend sees its own root-relative
+  // path, and normalizes away any trailing slash (except bare "/"). The
+  // shell's current-directory string always carries a trailing slash by
+  // design (see Shell::setCurrentPath), but SD_MMC's VFS layer doesn't
+  // reliably open a directory for listing with one - open("/etc/") could
+  // fail to enumerate even though exists()/isDir() tolerate it fine,
+  // which is exactly why 'cd'/'mkdir' worked but a bare 'ls' didn't.
   String stripSd(const String& path) {
-    if (!isSdPath(path)) return path;
-    String rest = path.substring(3);
-    if (rest.length() == 0) rest = "/";
-    return rest;
+    String result = path;
+    if (isSdPath(path)) {
+      result = path.substring(3);
+      if (result.length() == 0) result = "/";
+    }
+    if (result.length() > 1 && result.endsWith("/")) {
+      result.remove(result.length() - 1);
+    }
+    return result;
   }
 };

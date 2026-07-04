@@ -1,4 +1,4 @@
-# ESP-Nix v0.8.2
+# ESP-Nix v0.8.3
 
 A declarative, Unix-like shell operating system for the ESP32 — built from scratch on FreeRTOS, running entirely off an I2C LCD and a serial console (with optional SD card, PS/2 keyboard, and WiFi).
 
@@ -39,11 +39,11 @@ A declarative, Unix-like shell operating system for the ESP32 — built from scr
 - `nixfetch` — a neofetch-style system summary with a customizable ASCII logo
 - `loop <count|inf> [-i seconds] <command...>` — repeats a command, since the script engine has no real loop construct; any keypress stops it early
 
-## Partition Layout Change (v0.8.0) — and Fix (v0.8.2)
+## Partition Layout Change (v0.8.0) — and Fix (v0.8.3)
 
 v0.8.0 switched from the default two 1.25MB OTA slots to a single 3MB app partition (`huge_app.csv`), to recover flash headroom after HTTPS support ate into it. **This turned out to be broken, not just less safe.** A single `app0` doesn't just drop the OTA rollback fallback - it breaks `update`/OTA outright: the Arduino `Update` library needs a genuinely separate partition to write a new image into while the current one keeps executing, and with only one slot, `Update.begin()` ends up overwriting the flash pages the CPU is actively running from, crashing with `abort()` the moment it happens. Confirmed live: `update`-ing to v0.8.1 crashed at 0% and rebooted back into the previously-running v0.8.0 (no data lost, but OTA was non-functional the whole time).
 
-v0.8.2 fixes this with `min_spiffs.csv` — two real 1.875MB OTA slots (up from the default's 1.25MB, and with real fallback safety this time), LittleFS at 128KB. Full details, including why the first attempt failed, in the README's "Partition Layout" section.
+v0.8.3 fixes this with `min_spiffs.csv` — two real 1.875MB OTA slots (up from the default's 1.25MB, and with real fallback safety this time), LittleFS at 128KB. Full details, including why the first attempt failed, in the README's "Partition Layout" section.
 
 ## Hardware
 - ESP32 (required)

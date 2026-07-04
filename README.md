@@ -85,7 +85,7 @@ After booting, you'll see the shell prompt:
 
 ```
 nix:/$ help
-ESP-Nix 0.8.2 - Available commands:
+ESP-Nix 0.8.3 - Available commands:
   help        - Show this help
   ls [path]   - List directory
   pwd         - Print working directory
@@ -117,7 +117,7 @@ ESP-Nix 0.8.2 - Available commands:
 
 ```bash
 nix:/$ uname
-ESP-Nix 0.8.2
+ESP-Nix 0.8.3
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -158,7 +158,7 @@ A declarative OS for ESP32.
 nix:/$ uname > sysinfo.txt
 nix:/$ echo "more info" >> sysinfo.txt
 nix:/$ cat sysinfo.txt
-ESP-Nix 0.8.2
+ESP-Nix 0.8.3
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -232,6 +232,8 @@ SD          7580MB  12MB  7568MB      0%
 ```
 
 If no card is inserted, `/sd` simply doesn't appear in `ls /` and boot proceeds normally — the SD card is entirely optional.
+
+**Fixed bug (v0.8.3): `mkdir` on the SD card, followed by a bare `ls` in the same directory, wouldn't show the new folder** even though it genuinely existed (confirmed via `cd` into it directly). Root cause: the shell's current-directory path always carries a trailing slash (e.g. `/sd/etc/`), and `SD_MMC`'s VFS layer doesn't reliably open a directory for *listing* with a trailing slash present, even though `exists()`/`isDir()` (used by `cd`) tolerate it fine. Fixed by normalizing trailing slashes out of every path before it reaches the underlying filesystem, in `FileSystem::stripSd()` - the one place all file operations already route through.
 
 ### Editor: Line Editing
 
@@ -388,7 +390,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 0.8.2
+  |:_/ |         OS: ESP-Nix 0.8.3
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
