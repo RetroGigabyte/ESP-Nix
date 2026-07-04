@@ -96,7 +96,7 @@ public:
   }
 
   void init() {
-    term.println("ESP-Nix 0.8.6");
+    term.println("ESP-Nix 0.8.7");
     term.println("Type 'help' for command list\n");
   }
 
@@ -216,13 +216,26 @@ public:
 
       commands.setStdinBuffer(hasStdin ? &stdinContent : nullptr);
 
+      // Only touch the capture buffer when this stage actually needs its
+      // own local capture (mid-pipeline, or redirected output). Otherwise
+      // leave it alone - forcing it to nullptr here would clobber an
+      // outer caller's capture context (e.g. the browser terminal's
+      // executor, which captures a whole command's output by setting
+      // this before calling into the shell - a single unpiped command
+      // like 'nixfetch' has needsCapture=false, so unconditionally
+      // nulling it here meant its output printed to the physical
+      // console instead of being returned to the web page).
       String captured = "";
-      commands.setCaptureBuffer(needsCapture ? &captured : nullptr);
+      if (needsCapture) {
+        commands.setCaptureBuffer(&captured);
+      }
 
       result = commands.executeParsed(c.cmd, c.args);
 
       commands.setStdinBuffer(nullptr);
-      commands.setCaptureBuffer(nullptr);
+      if (needsCapture) {
+        commands.setCaptureBuffer(nullptr);
+      }
 
       if (needsCapture) {
         stdinContent = captured;
