@@ -14,3 +14,5 @@ Output ESP-Nix over RCA composite video to a CRT, instead of (or alongside) the 
 - Does composite video replace the LCD's status role, or run alongside it as a second output?
 - How much RAM/CPU headroom does the RCA graphics generation leave for the shell itself?
 - Character-only display (like a real text terminal) vs. anything more graphical?
+
+**RAM budget (2026-07-03):** target resolution is 320×240 at ~16 colors (4 bits/pixel) = 38,400 bytes (~37.5KB) per framebuffer, or ~75KB double-buffered. Measured separately, `wifi`/`curl`/`ping` push heap usage up to ~109KB while actively connected (WiFi + TLS runtime buffers). Combined, that's already over half the ESP32's 320KB total RAM before the shell, LittleFS, or anything else runs — CRT output and heavy networking likely can't both run at full intensity simultaneously without real budgeting. Worth deciding up front whether video is single-buffered (accept some flicker, save ~37.5KB) or whether networking gets scaled back while video is active.
