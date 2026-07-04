@@ -7,6 +7,8 @@
 #include <functional>
 #include "terminal.h"
 #include "input.h"
+#include "filesystem.h"
+#include "archive.h"
 
 // WiFi file server + browser terminal, reachable from a phone or computer.
 // Started on demand by the `webserver` command (wrapped by /system/web.sh
@@ -28,12 +30,12 @@ public:
   using CwdGetter = std::function<String()>;
 
   // Starts its own WiFi access point (works anywhere, no router needed)
-  void run(Terminal& term, const String& ssid, const String& password,
-           CommandExecutor executeCmd, CwdGetter getCwd) {
+  void run(FileSystem& fs, Terminal& term, const String& ssid, const String& password,
+           CommandExecutor executeCmd, CwdGetter getCwd, const String& nixfetchOutput) {
     ensureDefaultPages();
 
     WebServer server(80);
-    setupRoutes(server, executeCmd, getCwd);
+    setupRoutes(fs, term, server, executeCmd, getCwd, nixfetchOutput);
 
     WiFi.mode(WIFI_AP);
     bool apOk = (password.length() >= 8)
@@ -62,8 +64,8 @@ public:
 
   // Joins an existing WPA2 network instead of hosting its own AP, so the
   // server is reachable on the same network as your phone/computer.
-  void runSTA(Terminal& term, const String& ssid, const String& password,
-              CommandExecutor executeCmd, CwdGetter getCwd) {
+  void runSTA(FileSystem& fs, Terminal& term, const String& ssid, const String& password,
+              CommandExecutor executeCmd, CwdGetter getCwd, const String& nixfetchOutput) {
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid.c_str(), password.c_str());
 
@@ -83,7 +85,7 @@ public:
     ensureDefaultPages();
 
     WebServer server(80);
-    setupRoutes(server, executeCmd, getCwd);
+    setupRoutes(fs, term, server, executeCmd, getCwd, nixfetchOutput);
     server.begin();
 
     term.println("Web server running (files + terminal)");
@@ -129,6 +131,14 @@ private:
     fname = urlDecode(fname);
     if (!fname.startsWith("/")) fname = "/" + fname;
     return fname;
+  }
+
+  static String htmlEscape(const String& in) {
+    String out = in;
+    out.replace("&", "&amp;");
+    out.replace("<", "&lt;");
+    out.replace(">", "&gt;");
+    return out;
   }
 
   static String jsonEscape(const String& in) {
@@ -185,7 +195,9 @@ private:
     writeIfMissing("/www/shell.html", defaultShellPage());
   }
 
-  static String listFilesHTML() {
+  // Directories get a "(folder, zipped on download)" label and route
+  // through the same zip-on-the-fly logic as the /download handler.
+  static String listFilesHTML(FileSystem& fs) {
     String html = "<h2>Files on SD Card</h2><ul>";
     File root = SD_MMC.open("/");
     if (!root) return html + "<li>(failed to open root)</li></ul>";
@@ -193,7 +205,8 @@ private:
     File file = root.openNextFile();
     while (file) {
       String fname = String(file.name());
-      html += "<li>" + fname + " (" + String(file.size()) + " bytes) ";
+      bool isDir = file.isDirectory();
+      html += "<li>" + fname + (isDir ? " (folder, zipped on download) " : " (" + String(file.size()) + " bytes) ");
       html += "<a href='/download?file=" + fname + "'>Download</a> ";
       html += "<a href='/delete?file=" + fname + "' onclick=\"return confirm('Delete " + fname + "?');\">Delete</a>";
       html += "</li>";
@@ -212,9 +225,11 @@ private:
     html += "ul{list-style:none;padding-left:0} li{margin-bottom:8px}";
     html += "input[type=submit]{background:#333;color:#fff;border:none;padding:6px 12px;cursor:pointer}";
     html += "input[type=submit]:hover{background:#555}";
+    html += "pre{background:#000;color:#0f0;padding:1em;border-radius:4px;overflow-x:auto;font-size:13px}";
     html += "</style></head><body>";
     html += "<h1>ESP-Nix SD File Server</h1>";
     html += "<p><a href='/shell'>&#9654; Open Terminal</a></p>";
+    html += "<pre>{{NIXFETCH}}</pre>";
     html += "{{FILES}}";
     html += "<h2>Upload File</h2>";
     html += "<form method='POST' action='/upload' enctype='multipart/form-data'>";
@@ -266,10 +281,12 @@ private:
     return html;
   }
 
-  static void setupRoutes(WebServer& server, CommandExecutor& executeCmd, CwdGetter& getCwd) {
-    server.on("/", HTTP_GET, [&server]() {
+  static void setupRoutes(FileSystem& fs, Terminal& term, WebServer& server, CommandExecutor& executeCmd,
+                           CwdGetter& getCwd, const String& nixfetchOutput) {
+    server.on("/", HTTP_GET, [&server, &fs, &nixfetchOutput]() {
       String page = loadPage("/www/index.html", defaultIndexPage());
-      page.replace("{{FILES}}", listFilesHTML());
+      page.replace("{{FILES}}", listFilesHTML(fs));
+      page.replace("{{NIXFETCH}}", htmlEscape(nixfetchOutput));
       server.send(200, "text/html", page);
     });
 
@@ -290,9 +307,32 @@ private:
       server.send(200, "application/json", json);
     });
 
-    server.on("/download", HTTP_GET, [&server]() {
+    server.on("/download", HTTP_GET, [&server, &fs, &term]() {
       if (!server.hasArg("file")) { server.send(400, "text/plain", "Missing file parameter"); return; }
       String filename = sanitizeFilename(server.arg("file"));
+
+      // Directories get zipped on the fly, then streamed and cleaned up -
+      // there's no way to "download a folder" directly over HTTP.
+      if (fs.exists(filename) && fs.isDir(filename)) {
+        String tmpZip = "/_download_tmp.zip";
+        Archiver archiver;
+        if (!archiver.compress(fs, term, filename, tmpZip)) {
+          server.send(500, "text/plain", "Failed to zip: " + filename);
+          return;
+        }
+
+        File zipFile = SD_MMC.open(tmpZip, FILE_READ);
+        if (!zipFile) { server.send(500, "text/plain", "Failed to open zip"); return; }
+
+        int lastSlash = filename.lastIndexOf('/');
+        String shortName = filename.substring(lastSlash + 1);
+        server.sendHeader("Content-Disposition", "attachment; filename=\"" + shortName + ".zip\"");
+        server.streamFile(zipFile, "application/zip");
+        zipFile.close();
+        SD_MMC.remove(tmpZip);
+        return;
+      }
+
       File file = SD_MMC.open(filename, FILE_READ);
       if (!file) { server.send(404, "text/plain", "File not found: " + filename); return; }
 

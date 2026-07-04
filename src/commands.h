@@ -66,7 +66,7 @@ public:
       "grep", "head", "tail", "mkdir", "clear", "edit", "env", "uname",
       "whoami", "date", "df", "free", "nixos-rebuild", "webserver", "update",
       "find", "wc", "du", "reboot", "ntp", "extract", "compress", "test", "settz", "nixfetch", "loop",
-      "wifi", "ip", "ping", "curl", "retron", "exit"
+      "wifi", "ip", "ping", "curl", "retron", "sleep", "exit"
     };
     return names;
   }
@@ -150,6 +150,7 @@ private:
     if (cmd == "ping") return cmdPing(args);
     if (cmd == "curl") return cmdCurl(args);
     if (cmd == "retron") return cmdRetron(args);
+    if (cmd == "sleep") return cmdSleep(args);
     if (cmd == "exit") return cmdExit(args);
 
     return tryRunSystemScript(cmd, args);
@@ -228,19 +229,24 @@ private:
       return getCurrentPath();
     };
 
+    // Snapshot of nixfetch at the moment 'web' starts, shown on the file
+    // manager's index page - not live-refreshed per request, just a
+    // one-time capture like running it yourself right before opening web.
+    String nixfetchOutput = executor("nixfetch");
+
     // Prefer a previously-joined WPA2 network (see 'web -join') so the
     // server lands on the same network as your computer; fall back to
     // hosting its own access point otherwise.
     String staSsid = (vars && vars->exists("WIFI_SSID")) ? vars->get("WIFI_SSID") : "";
     if (staSsid.length() > 0) {
       String staPass = (vars && vars->exists("WIFI_PASS")) ? vars->get("WIFI_PASS") : "";
-      webServer.runSTA(term, staSsid, staPass, executor, cwdGetter);
+      webServer.runSTA(fs, term, staSsid, staPass, executor, cwdGetter, nixfetchOutput);
       return true;
     }
 
     String ssid = (vars && vars->exists("WEB_SSID")) ? vars->get("WEB_SSID") : "ESP-Nix";
     String password = (vars && vars->exists("WEB_PASS")) ? vars->get("WEB_PASS") : "";
-    webServer.run(term, ssid, password, executor, cwdGetter);
+    webServer.run(fs, term, ssid, password, executor, cwdGetter, nixfetchOutput);
     return true;
   }
 
@@ -930,7 +936,7 @@ private:
   }
 
   bool cmdHelp(const std::vector<String>& args) {
-    out("ESP-Nix 0.8.5 - Available commands:");
+    out("ESP-Nix 0.8.6 - Available commands:");
     out("  help        - Show this help");
     out("  ls [-l] [path] - List directory (-l for permissions/size/date)");
     out("  pwd         - Print working directory");
@@ -980,6 +986,7 @@ private:
     out("  ping <host>   - Ping a host (requires 'wifi connect' first)");
     out("  curl [-X METHOD] [-d data] <url> - Basic HTTP client");
     out("  retron <file.retro> - Run a Retron language script (variables/loops/if)");
+    out("  sleep <seconds> - Pause (any key interrupts)");
     out("  cat /proc/{version,uptime,meminfo,cpuinfo} - Virtual system info");
     out("  /system/*.sh files run anywhere by name (no ./ or .sh)");
     return true;
@@ -1073,7 +1080,7 @@ private:
   // info as readable pseudo-files rather than only via commands.
   bool getProcContent(const String& path, String& content) {
     if (path == "/proc/version") {
-      content = "ESP-Nix version 0.8.5 (FreeRTOS) Xtensa\n";
+      content = "ESP-Nix version 0.8.6 (FreeRTOS) Xtensa\n";
       return true;
     }
     if (path == "/proc/uptime") {
@@ -1239,7 +1246,7 @@ private:
   }
 
   bool cmdUname(const std::vector<String>& args) {
-    out("ESP-Nix 0.8.5");
+    out("ESP-Nix 0.8.6");
     out("System: ESP32 WROOM32E");
     out("Arch: Xtensa");
     out("Kernel: FreeRTOS");
@@ -1291,7 +1298,7 @@ private:
     std::vector<String> info;
     info.push_back("root@esp-nix");
     info.push_back("------------");
-    info.push_back("OS: ESP-Nix 0.8.5");
+    info.push_back("OS: ESP-Nix 0.8.6");
     info.push_back("Host: ESP32 WROOM32E");
     info.push_back("Kernel: FreeRTOS");
     info.push_back("Uptime: " + formatUptime(millis() / 1000));
@@ -1417,8 +1424,13 @@ private:
   // If destPath is an existing directory, the actual target is the
   // source's basename inside it - e.g. "cp file.txt /sd" means
   // "/sd/file.txt", not literally overwriting "/sd" itself.
-  String resolveDestPath(const String& srcPath, const String& destPath) {
-    if (fs.exists(destPath) && fs.isDir(destPath)) {
+  // destIsDir is passed in rather than re-checked here on every call:
+  // when the destination was just auto-created by cmdCp/cmdMv (for a
+  // multi-match glob), re-querying fs.exists()/isDir() immediately
+  // afterward isn't reliable on SD_MMC - the same class of VFS quirk
+  // fixed for 'ls' in stripSd() (see v0.8.6's mkdir+ls bug fix).
+  String resolveDestPath(const String& srcPath, const String& destPath, bool destIsDir) {
+    if (destIsDir) {
       String base = srcPath;
       int slash = base.lastIndexOf('/');
       if (slash >= 0) base = base.substring(slash + 1);
@@ -1482,23 +1494,24 @@ private:
     // Multiple matches can't all land on one literal destination path -
     // auto-create it as a directory so each file gets its own name inside
     // it, instead of silently overwriting each other one by one.
-    if (srcPaths.size() > 1 && !(fs.exists(destArg) && fs.isDir(destArg))) {
-      fs.createDir(destArg);
+    bool destIsDir = fs.exists(destArg) && fs.isDir(destArg);
+    if (srcPaths.size() > 1 && !destIsDir) {
+      destIsDir = fs.createDir(destArg);
     }
 
     for (const auto& srcPath : srcPaths) {
-      copyOneFile(srcPath, destArg, recursive);
+      copyOneFile(srcPath, destArg, destIsDir, recursive);
     }
     return true;
   }
 
-  void copyOneFile(const String& srcPath, const String& destArg, bool recursive) {
+  void copyOneFile(const String& srcPath, const String& destArg, bool destIsDir, bool recursive) {
     if (!fs.exists(srcPath)) {
       term.println("Source not found: " + srcPath);
       return;
     }
 
-    String destPath = resolveDestPath(srcPath, destArg);
+    String destPath = resolveDestPath(srcPath, destArg, destIsDir);
 
     if (fs.isDir(srcPath)) {
       if (!recursive) {
@@ -1535,23 +1548,24 @@ private:
     // Multiple matches can't all land on one literal destination path -
     // auto-create it as a directory so each file gets its own name inside
     // it, instead of silently overwriting each other one by one.
-    if (srcPaths.size() > 1 && !(fs.exists(destArg) && fs.isDir(destArg))) {
-      fs.createDir(destArg);
+    bool destIsDir = fs.exists(destArg) && fs.isDir(destArg);
+    if (srcPaths.size() > 1 && !destIsDir) {
+      destIsDir = fs.createDir(destArg);
     }
 
     for (const auto& srcPath : srcPaths) {
-      moveOneFile(srcPath, destArg, recursive);
+      moveOneFile(srcPath, destArg, destIsDir, recursive);
     }
     return true;
   }
 
-  void moveOneFile(const String& srcPath, const String& destArg, bool recursive) {
+  void moveOneFile(const String& srcPath, const String& destArg, bool destIsDir, bool recursive) {
     if (!fs.exists(srcPath)) {
       term.println("Source not found: " + srcPath);
       return;
     }
 
-    String destPath = resolveDestPath(srcPath, destArg);
+    String destPath = resolveDestPath(srcPath, destArg, destIsDir);
 
     if (fs.isDir(srcPath)) {
       if (!recursive) {
@@ -1971,6 +1985,27 @@ private:
   // loop <count|inf> [-i seconds] <command...> - repeats a command since
   // the script engine has no real loop construct (no if/for, just a flat
   // command sequence). Any keypress stops it early, even mid-wait.
+  // sleep <seconds> - pauses, interruptible by any keypress (same pattern
+  // as loop's between-iteration wait).
+  bool cmdSleep(const std::vector<String>& args) {
+    if (args.size() < 2) {
+      term.println("Usage: sleep <seconds>");
+      return true;
+    }
+
+    unsigned long waitMs = (unsigned long)args[1].toFloat() * 1000;
+    unsigned long start = millis();
+    while (millis() - start < waitMs) {
+      if (input.available()) {
+        input.read();
+        term.println("Sleep interrupted.");
+        return true;
+      }
+      delay(10);
+    }
+    return true;
+  }
+
   bool cmdLoop(const std::vector<String>& args) {
     if (args.size() < 3) {
       term.println("Usage: loop <count|inf> [-i seconds] <command...>");

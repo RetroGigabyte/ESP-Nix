@@ -31,7 +31,9 @@ A minimal declarative operating system for ESP32 with a Unix-like shell interfac
 - **`loop`**: repeats a command a fixed number of times or indefinitely, since the script engine has no real loop construct
 - **`wifi`/`ip`/`ping`**: a persistent WiFi connection (`wifi connect`) that stays up in the background, plus status/IP lookup and host reachability checks
 - **`curl`**: basic HTTP/HTTPS client for scripts and quick API checks
-- **`retron`**: runs [Retron](https://github.com/RetroGigabyte/Retron) scripts — real variables, `if`/`loop`/functions, genuinely new logic beyond what `/system`/`/boot` scripts can sequence
+- **`retron`**: runs [Retron](https://github.com/RetroGigabyte/Retron) scripts — real variables, `if`/`loop`/functions, `INPUT` for reading text, genuinely new logic beyond what `/system`/`/boot` scripts can sequence
+- **`sleep <seconds>`**: pauses, interruptible by any keypress
+- **Folder downloads + `nixfetch` on the web page**: `web`'s file manager zips folders on the fly for download, and shows a `nixfetch` snapshot taken when `web` starts
 
 ## Hardware
 
@@ -86,7 +88,7 @@ After booting, you'll see the shell prompt:
 
 ```
 nix:/$ help
-ESP-Nix 0.8.5 - Available commands:
+ESP-Nix 0.8.6 - Available commands:
   help        - Show this help
   ls [path]   - List directory
   pwd         - Print working directory
@@ -118,7 +120,7 @@ ESP-Nix 0.8.5 - Available commands:
 
 ```bash
 nix:/$ uname
-ESP-Nix 0.8.5
+ESP-Nix 0.8.6
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -159,7 +161,7 @@ A declarative OS for ESP32.
 nix:/$ uname > sysinfo.txt
 nix:/$ echo "more info" >> sysinfo.txt
 nix:/$ cat sysinfo.txt
-ESP-Nix 0.8.5
+ESP-Nix 0.8.6
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -189,7 +191,7 @@ nix:/$ rm -r /data/system-backup-2
 
 Both also accept a glob in the source: `mv cool.* sd` moves every file starting with `cool.` into `/sd`. Supported patterns are `*.txt`, `cool.*`, `*cool*`, and `*` — same matching `find` uses.
 
-If a glob matches more than one file and the destination doesn't exist yet, it's auto-created as a directory so each match gets its own name inside it — e.g. `mv *.retro retron` creates `retron/` and moves every script into it. (Fixed in v0.8.5 — previously, multiple matches with a not-yet-existing destination all landed on the same literal path and clobbered each other.)
+If a glob matches more than one file and the destination doesn't exist yet, it's auto-created as a directory so each match gets its own name inside it — e.g. `mv *.retro retron` creates `retron/` and moves every script into it. (Fixed in v0.8.6 — previously, multiple matches with a not-yet-existing destination all landed on the same literal path and clobbered each other.)
 
 ### find, wc, du
 
@@ -236,7 +238,7 @@ SD          7580MB  12MB  7568MB      0%
 
 If no card is inserted, `/sd` simply doesn't appear in `ls /` and boot proceeds normally — the SD card is entirely optional.
 
-**Fixed bug (v0.8.5): `mkdir` on the SD card, followed by a bare `ls` in the same directory, wouldn't show the new folder** even though it genuinely existed (confirmed via `cd` into it directly). Root cause: the shell's current-directory path always carries a trailing slash (e.g. `/sd/etc/`), and `SD_MMC`'s VFS layer doesn't reliably open a directory for *listing* with a trailing slash present, even though `exists()`/`isDir()` (used by `cd`) tolerate it fine. Fixed by normalizing trailing slashes out of every path before it reaches the underlying filesystem, in `FileSystem::stripSd()` - the one place all file operations already route through.
+**Fixed bug (v0.8.6): `mkdir` on the SD card, followed by a bare `ls` in the same directory, wouldn't show the new folder** even though it genuinely existed (confirmed via `cd` into it directly). Root cause: the shell's current-directory path always carries a trailing slash (e.g. `/sd/etc/`), and `SD_MMC`'s VFS layer doesn't reliably open a directory for *listing* with a trailing slash present, even though `exists()`/`isDir()` (used by `cd`) tolerate it fine. Fixed by normalizing trailing slashes out of every path before it reaches the underlying filesystem, in `FileSystem::stripSd()` - the one place all file operations already route through.
 
 ### Editor: Line Editing
 
@@ -393,7 +395,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 0.8.5
+  |:_/ |         OS: ESP-Nix 0.8.6
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -459,6 +461,28 @@ END
 Variables use a `/name` prefix, `&` concatenates strings, `[expr]` embeds an expression in a string, and blocks close with `END` or `@!` (interchangeable). Full syntax reference in the [Retron repo](https://github.com/RetroGigabyte/Retron/blob/master/language.txt).
 
 **`DRAW` isn't supported yet** — Retron's graphics command needs composite video output, which isn't wired up on ESP-Nix (see `goals.md`'s CRT project). Scripts using `DRAW` get a clear message instead of failing silently; once CRT output lands, this is the planned hook-up point.
+
+**`INPUT key` reads a line from Serial/PS2 into a variable**, storing it as raw text (separate from the numeric `/x = 5` style variables) so typed strings interpolate correctly in `print`, while still working in arithmetic if the input was a number:
+
+```bash
+nix:/$ retron input.retro
+[types: Richard]
+You entered: Richard
+```
+
+```
+# input.retro
+input response
+print "You entered: " & /response
+```
+
+### sleep
+
+Pauses for a fixed number of seconds, interruptible by any keypress:
+
+```bash
+nix:/$ sleep 5
+```
 
 ### wifi, ip, ping
 
@@ -555,6 +579,10 @@ Capped at the same 30-entry limit as in-memory history always had; the file is j
 ### WiFi File Server + Browser Terminal
 
 Requires an SD card. Start it with `webserver` or the shorter `web` (a `/system/web.sh` wrapper is created automatically):
+
+**The file manager page shows a `nixfetch` snapshot** taken the moment `web` starts — not live-refreshed per request, just a one-time capture like running `nixfetch` yourself right before opening the page.
+
+**Folders are downloadable too**, zipped on the fly: clicking Download on a folder compresses it with the same `Archiver` `extract`/`compress` uses, streams the resulting `.zip`, then deletes the temporary file — there's no way to send a folder directly over HTTP, so this is the only option.
 
 ```bash
 nix:/$ web

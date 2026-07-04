@@ -6,6 +6,7 @@
 #include <cmath>
 #include "filesystem.h"
 #include "terminal.h"
+#include "input.h"
 
 // Port of RetroGigabyte/Retron (github.com/RetroGigabyte/Retron) into
 // ESP-Nix, adapted from the reference retron_mac.cpp interpreter. Graphics
@@ -21,6 +22,7 @@ struct RetronFunctionDef {
 class RetronInterpreter {
 public:
   std::map<String, float> variables;
+  std::map<String, String> stringVariables;  // INPUT results - raw text, not float
   std::vector<String> lines;
   int pc = 0;
   std::map<String, RetronFunctionDef> functions;
@@ -94,10 +96,39 @@ private:
 
     if (t[0] == '/') {
       String varName = t.substring(1);
+      if (stringVariables.count(varName)) return stringVariables[varName].toFloat();
       if (variables.count(varName)) return variables[varName];
       return 0;
     }
     return t.toFloat();
+  }
+
+  // Reads one line from Serial/PS2 (whichever has data), same character
+  // handling as the shell's own prompt - used by the INPUT command.
+  String readLine() {
+    String line = "";
+    while (true) {
+      if (input.available()) {
+        char c = input.read();
+        if (c == '\r' || c == '\n') {
+          if (c == '\r') {
+            delay(5);
+            if (input.available() && input.peek() == '\n') input.read();
+          }
+          Serial.println();
+          return line;
+        } else if (c == 8 || c == 127) {
+          if (line.length() > 0) {
+            line.remove(line.length() - 1);
+            Serial.print("\b \b");
+          }
+        } else if (c >= 32 && c < 127) {
+          line += c;
+          Serial.print(c);
+        }
+      }
+      delay(5);
+    }
   }
 
   float evalExpression(String e) {
@@ -158,6 +189,10 @@ private:
 
     if (cmd == "PRINT") {
       term.println(evaluateString(args));
+    } else if (cmd == "INPUT") {
+      String key = args;
+      key.trim();
+      stringVariables[key] = readLine();
     } else if (cmd == "DRAW") {
       term.println("retron: DRAW needs composite video output, which isn't wired up on this ESP-Nix build yet - skipping.");
     } else if (cmd == "LOOP") {
@@ -187,7 +222,11 @@ private:
         int end = i + 1;
         while (end < (int)str.length() && (isAlphaNumeric(str[end]) || str[end] == '_')) end++;
         String varName = str.substring(i + 1, end);
-        result += String((int)variables[varName]);
+        if (stringVariables.count(varName)) {
+          result += stringVariables[varName];
+        } else {
+          result += String((int)variables[varName]);
+        }
         i = end;
       } else {
         i++;

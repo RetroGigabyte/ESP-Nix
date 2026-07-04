@@ -1,4 +1,4 @@
-# ESP-Nix v0.8.5
+# ESP-Nix v0.8.6
 
 A declarative, Unix-like shell operating system for the ESP32 — built from scratch on FreeRTOS, running entirely off an I2C LCD and a serial console (with optional SD card, PS/2 keyboard, and WiFi).
 
@@ -38,19 +38,21 @@ A declarative, Unix-like shell operating system for the ESP32 — built from scr
 - Full line editor (`edit`) with mid-line cursor movement, line insert/delete, and Up/Down navigation between lines
 - `nixfetch` — a neofetch-style system summary with a customizable ASCII logo
 - `loop <count|inf> [-i seconds] <command...>` — repeats a command, since the script engine has no real loop construct; any keypress stops it early
-- `retron <file.retro>` — runs scripts in [Retron](https://github.com/RetroGigabyte/Retron) (real variables, `if`/`loop`/functions - genuinely new logic, not just sequences of existing commands). `DRAW` (graphics) errors clearly rather than silently no-op'ing, since composite video output isn't wired up yet
+- `retron <file.retro>` — runs scripts in [Retron](https://github.com/RetroGigabyte/Retron) (real variables, `if`/`loop`/functions, `INPUT` for reading text - genuinely new logic, not just sequences of existing commands). `DRAW` (graphics) errors clearly rather than silently no-op'ing, since composite video output isn't wired up yet
+- `sleep <seconds>` — pauses, interruptible by any keypress
+- `web`'s file manager now zips folders on the fly for download, and shows a `nixfetch` snapshot taken when `web` starts
 
-## Partition Layout Change (v0.8.0) — and Fix (v0.8.5)
+## Partition Layout Change (v0.8.0) — and Fix (v0.8.6)
 
 v0.8.0 switched from the default two 1.25MB OTA slots to a single 3MB app partition (`huge_app.csv`), to recover flash headroom after HTTPS support ate into it. **This turned out to be broken, not just less safe.** A single `app0` doesn't just drop the OTA rollback fallback - it breaks `update`/OTA outright: the Arduino `Update` library needs a genuinely separate partition to write a new image into while the current one keeps executing, and with only one slot, `Update.begin()` ends up overwriting the flash pages the CPU is actively running from, crashing with `abort()` the moment it happens. Confirmed live: `update`-ing to v0.8.1 crashed at 0% and rebooted back into the previously-running v0.8.0 (no data lost, but OTA was non-functional the whole time).
 
-v0.8.5 fixes this with `min_spiffs.csv` — two real 1.875MB OTA slots (up from the default's 1.25MB, and with real fallback safety this time), LittleFS at 128KB. Full details, including why the first attempt failed, in the README's "Partition Layout" section.
+v0.8.6 fixes this with `min_spiffs.csv` — two real 1.875MB OTA slots (up from the default's 1.25MB, and with real fallback safety this time), LittleFS at 128KB. Full details, including why the first attempt failed, in the README's "Partition Layout" section.
 
-## Bug Fix (v0.8.5): mkdir + ls on SD card
+## Bug Fix (v0.8.6): mkdir + ls on SD card
 
 `mkdir` on the SD card would report success, and `cd` into the new directory would confirm it genuinely existed - but a bare `ls` in that same directory wouldn't show it. Root cause: the shell's current-directory string always carries a trailing slash (e.g. `/sd/etc/`), and `SD_MMC`'s VFS layer doesn't reliably enumerate a directory opened with one present, even though `exists()`/`isDir()` (what `cd` uses) tolerate it fine. Fixed by normalizing trailing slashes out of every path in `FileSystem::stripSd()` - the single choke point all file operations already route through, so this fixes it everywhere at once rather than just in `ls`.
 
-## Bug Fix (v0.8.5): mv/cp with multiple glob matches to a non-existent destination
+## Bug Fix (v0.8.6): mv/cp with multiple glob matches to a non-existent destination
 
 `mv *.retro retron` (destination folder not yet created) silently clobbered every matched file onto the same literal path one after another, instead of erroring or creating a folder - `resolveDestPath()` only treated the destination as a directory if it *already* existed as one. Fixed in `cmdCp`/`cmdMv`: when a glob expands to more than one source file and the destination doesn't already exist as a directory, it's auto-created as one first, so each file lands inside it under its own name instead of overwriting the last.
 
