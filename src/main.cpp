@@ -15,6 +15,15 @@
 #define PS2_CLOCK_PIN 26
 #define PS2_DATA_PIN 25
 
+// Overrides the Arduino core's weak default (8192) - the shell's command
+// dispatch nests deeply (pipeline -> command -> library calls), and some
+// commands construct sizable objects on the stack (e.g. ESP32_FTPClient's
+// internal 1.5KB buffer). ftp get crashed with a stack canary overflow at
+// the default size.
+size_t getArduinoLoopTaskStackSize(void) {
+  return 16384;
+}
+
 // Global objects
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 FileSystem fsys;

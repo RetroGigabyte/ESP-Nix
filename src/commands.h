@@ -16,6 +16,7 @@
 #include <ESP32Ping.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include "ftpclient/ESP32_FTPClient.h"
 
 class Commands {
 private:
@@ -66,7 +67,7 @@ public:
       "grep", "head", "tail", "mkdir", "clear", "edit", "env", "uname",
       "whoami", "date", "df", "free", "nixos-rebuild", "webserver", "update",
       "find", "wc", "du", "reboot", "ntp", "extract", "compress", "test", "settz", "nixfetch", "loop",
-      "wifi", "ip", "ping", "curl", "retron", "sleep", "hostname", "backup", "exit"
+      "wifi", "ip", "ping", "curl", "wget", "ftp", "retron", "sleep", "hostname", "backup", "exit"
     };
     return names;
   }
@@ -149,6 +150,8 @@ private:
     if (cmd == "ip") return cmdIp(args);
     if (cmd == "ping") return cmdPing(args);
     if (cmd == "curl") return cmdCurl(args);
+    if (cmd == "wget") return cmdWget(args);
+    if (cmd == "ftp") return cmdFtp(args);
     if (cmd == "retron") return cmdRetron(args);
     if (cmd == "sleep") return cmdSleep(args);
     if (cmd == "hostname") return cmdHostname(args);
@@ -534,6 +537,300 @@ private:
 
     http.end();
     return true;
+  }
+
+  // wget <url> [-O output] - downloads a URL straight to a file, using
+  // the same HTTPClient/WiFiClientSecure plumbing as curl. Streams the
+  // response in chunks rather than buffering the whole body in RAM.
+  bool cmdWget(const std::vector<String>& args) {
+    if (args.size() < 2) {
+      term.println("Usage: wget <url> [-O output]");
+      return true;
+    }
+    if (WiFi.status() != WL_CONNECTED) {
+      term.println("WiFi is off (run 'wifi connect' first)");
+      return true;
+    }
+
+    String url = "";
+    String outputArg = "";
+
+    for (size_t i = 1; i < args.size(); i++) {
+      if (args[i] == "-O" && i + 1 < args.size()) {
+        outputArg = args[++i];
+      } else {
+        url = args[i];
+      }
+    }
+
+    if (url.length() == 0) {
+      term.println("Usage: wget <url> [-O output]");
+      return true;
+    }
+
+    String outputPath;
+    if (outputArg.length() > 0) {
+      outputPath = fs.resolvePath(outputArg);
+    } else {
+      String base = url;
+      int q = base.indexOf('?');
+      if (q >= 0) base = base.substring(0, q);
+      int slash = base.lastIndexOf('/');
+      base = (slash >= 0 && slash + 1 < (int)base.length()) ? base.substring(slash + 1) : "download";
+      outputPath = fs.resolvePath(base);
+    }
+
+    HTTPClient http;
+    WiFiClientSecure secureClient;
+
+    bool began;
+    if (url.startsWith("https://")) {
+      secureClient.setInsecure();
+      began = http.begin(secureClient, url);
+    } else {
+      began = http.begin(url);
+    }
+
+    if (!began) {
+      term.println("wget: could not parse URL: " + url);
+      return true;
+    }
+
+    int statusCode = http.GET();
+    if (statusCode <= 0) {
+      term.println("wget: request failed: " + http.errorToString(statusCode));
+      http.end();
+      return true;
+    }
+    if (statusCode != 200) {
+      term.println("wget: server returned HTTP " + String(statusCode));
+      http.end();
+      return true;
+    }
+
+    File outFile = fs.openRaw(outputPath, "w");
+    if (!outFile) {
+      term.println("wget: could not create " + outputPath);
+      http.end();
+      return true;
+    }
+
+    WiFiClient* stream = http.getStreamPtr();
+    int total = http.getSize();
+    int written = 0;
+    uint8_t buf[512];
+
+    while (http.connected() && (total < 0 || written < total)) {
+      size_t avail = stream->available();
+      if (avail == 0) {
+        if (!stream->connected()) break;
+        delay(5);
+        continue;
+      }
+      size_t toRead = avail > sizeof(buf) ? sizeof(buf) : avail;
+      int n = stream->readBytes(buf, toRead);
+      if (n <= 0) break;
+      outFile.write(buf, n);
+      written += n;
+    }
+
+    outFile.close();
+    http.end();
+
+    term.println("Saved " + String(written) + " bytes to " + outputPath);
+    return true;
+  }
+
+  // Parses ftp://[user[:pass]@]host[:port]/path into its parts. Returns
+  // false if the URL isn't a valid ftp:// URL. Missing user/pass default
+  // to "anonymous"/"" per FTP convention.
+  bool parseFtpUrl(const String& url, String& host, uint16_t& port, String& user, String& pass, String& path) {
+    if (!url.startsWith("ftp://")) return false;
+    String rest = url.substring(6);
+
+    int slash = rest.indexOf('/');
+    String authority = (slash >= 0) ? rest.substring(0, slash) : rest;
+    path = (slash >= 0) ? rest.substring(slash) : "/";
+    if (path.length() == 0) path = "/";
+
+    user = "anonymous";
+    pass = "";
+    int at = authority.lastIndexOf('@');
+    if (at >= 0) {
+      String cred = authority.substring(0, at);
+      authority = authority.substring(at + 1);
+      int colon = cred.indexOf(':');
+      if (colon >= 0) {
+        user = cred.substring(0, colon);
+        pass = cred.substring(colon + 1);
+      } else {
+        user = cred;
+      }
+    }
+
+    port = 21;
+    int pcolon = authority.indexOf(':');
+    if (pcolon >= 0) {
+      port = authority.substring(pcolon + 1).toInt();
+      host = authority.substring(0, pcolon);
+    } else {
+      host = authority;
+    }
+
+    return host.length() > 0;
+  }
+
+  // ftp get ftp://[user:pass@]host/remote/path [localfile]
+  // ftp put <localfile> ftp://[user:pass@]host/remote/path
+  // ftp ls ftp://[user:pass@]host/dir
+  bool cmdFtp(const std::vector<String>& args) {
+    if (args.size() < 3) {
+      term.println("Usage: ftp get <ftp://url> [localfile]");
+      term.println("       ftp put <localfile> <ftp://url>");
+      term.println("       ftp ls <ftp://url>");
+      return true;
+    }
+    if (WiFi.status() != WL_CONNECTED) {
+      term.println("WiFi is off (run 'wifi connect' first)");
+      return true;
+    }
+
+    String sub = args[1];
+    String host, user, pass, path;
+    uint16_t port;
+
+    if (sub == "get") {
+      if (!parseFtpUrl(args[2], host, port, user, pass, path)) {
+        term.println("ftp: invalid URL: " + args[2]);
+        return true;
+      }
+      String localPath;
+      if (args.size() >= 4) {
+        localPath = fs.resolvePath(args[3]);
+      } else {
+        int slash = path.lastIndexOf('/');
+        String base = (slash >= 0 && slash + 1 < (int)path.length()) ? path.substring(slash + 1) : "download";
+        localPath = fs.resolvePath(base);
+      }
+
+      char hostBuf[128], userBuf[64], passBuf[64];
+      host.toCharArray(hostBuf, sizeof(hostBuf));
+      user.toCharArray(userBuf, sizeof(userBuf));
+      pass.toCharArray(passBuf, sizeof(passBuf));
+
+      ESP32_FTPClient ftp(hostBuf, port, userBuf, passBuf, 10000, 0);
+      ftp.OpenConnection();
+      if (!ftp.isConnected()) {
+        term.println("ftp: could not connect/login to " + host);
+        return true;
+      }
+
+      File outFile = fs.openRaw(localPath, "w");
+      if (!outFile) {
+        term.println("ftp: could not create " + localPath);
+        ftp.CloseConnection();
+        return true;
+      }
+
+      ftp.InitFile("Type I");
+      char pathBuf[256];
+      path.toCharArray(pathBuf, sizeof(pathBuf));
+      size_t written = ftp.DownloadFileToFile(pathBuf, outFile);
+      outFile.close();
+      ftp.CloseConnection();
+
+      if (written == 0) {
+        term.println("ftp: download failed or file not found: " + path);
+        fs.deleteFile(localPath);
+      } else {
+        term.println("Saved " + String(written) + " bytes to " + localPath);
+      }
+      return true;
+
+    } else if (sub == "put") {
+      if (args.size() < 4) {
+        term.println("Usage: ftp put <localfile> <ftp://url>");
+        return true;
+      }
+      String localPath = fs.resolvePath(args[2]);
+      if (!parseFtpUrl(args[3], host, port, user, pass, path)) {
+        term.println("ftp: invalid URL: " + args[3]);
+        return true;
+      }
+
+      File inFile = fs.openRaw(localPath, "r");
+      if (!inFile) {
+        term.println("ftp: no such file: " + localPath);
+        return true;
+      }
+
+      char hostBuf[128], userBuf[64], passBuf[64];
+      host.toCharArray(hostBuf, sizeof(hostBuf));
+      user.toCharArray(userBuf, sizeof(userBuf));
+      pass.toCharArray(passBuf, sizeof(passBuf));
+
+      ESP32_FTPClient ftp(hostBuf, port, userBuf, passBuf, 10000, 0);
+      ftp.OpenConnection();
+      if (!ftp.isConnected()) {
+        term.println("ftp: could not connect/login to " + host);
+        inFile.close();
+        return true;
+      }
+
+      ftp.InitFile("Type I");
+      char pathBuf[256];
+      path.toCharArray(pathBuf, sizeof(pathBuf));
+      ftp.NewFile(pathBuf);
+
+      size_t total = 0;
+      uint8_t buf[512];
+      while (inFile.available()) {
+        size_t n = inFile.read(buf, sizeof(buf));
+        if (n == 0) break;
+        ftp.WriteData(buf, n);
+        total += n;
+      }
+      inFile.close();
+      ftp.CloseFile();
+      ftp.CloseConnection();
+
+      term.println("Uploaded " + String(total) + " bytes to " + path);
+      return true;
+
+    } else if (sub == "ls") {
+      if (!parseFtpUrl(args[2], host, port, user, pass, path)) {
+        term.println("ftp: invalid URL: " + args[2]);
+        return true;
+      }
+
+      char hostBuf[128], userBuf[64], passBuf[64];
+      host.toCharArray(hostBuf, sizeof(hostBuf));
+      user.toCharArray(userBuf, sizeof(userBuf));
+      pass.toCharArray(passBuf, sizeof(passBuf));
+
+      ESP32_FTPClient ftp(hostBuf, port, userBuf, passBuf, 10000, 0);
+      ftp.OpenConnection();
+      if (!ftp.isConnected()) {
+        term.println("ftp: could not connect/login to " + host);
+        return true;
+      }
+
+      ftp.InitFile("Type A");
+      char pathBuf[256];
+      path.toCharArray(pathBuf, sizeof(pathBuf));
+      String listing[128];
+      ftp.ContentListWithListCommand(pathBuf, listing);
+      ftp.CloseConnection();
+
+      for (int i = 0; i < 128 && listing[i].length() > 0; i++) {
+        term.println(listing[i]);
+      }
+      return true;
+
+    } else {
+      term.println("ftp: unknown subcommand: " + sub);
+      return true;
+    }
   }
 
   // Runs a .retro script (RetroGigabyte/Retron language), ported from
@@ -969,7 +1266,7 @@ private:
   }
 
   bool cmdHelp(const std::vector<String>& args) {
-    out("ESP-Nix 0.9.1.1 - Available commands:");
+    out("ESP-Nix 0.9.2.5 - Available commands:");
     out("  help        - Show this help");
     out("  ls [-l] [path] - List directory (-l for permissions/size/date)");
     out("  pwd         - Print working directory");
@@ -1018,6 +1315,8 @@ private:
     out("  ip            - Show current IP address");
     out("  ping <host>   - Ping a host (requires 'wifi connect' first)");
     out("  curl [-X METHOD] [-d data] <url> - Basic HTTP client");
+    out("  wget <url> [-O output] - Download a URL straight to a file");
+    out("  ftp get <ftp://url> [file] | ftp put <file> <ftp://url> | ftp ls <ftp://url>");
     out("  retron <file.retro> - Run a Retron language script (variables/loops/if)");
     out("  sleep <seconds> - Pause (any key interrupts)");
     out("  hostname [-v] | hostname -s <name> - Show/set hostname (prompt + WiFi)");
@@ -1115,7 +1414,7 @@ private:
   // info as readable pseudo-files rather than only via commands.
   bool getProcContent(const String& path, String& content) {
     if (path == "/proc/version") {
-      content = "ESP-Nix version 0.9.1.1 (FreeRTOS) Xtensa\n";
+      content = "ESP-Nix version 0.9.2.5 (FreeRTOS) Xtensa\n";
       return true;
     }
     if (path == "/proc/uptime") {
@@ -1281,7 +1580,7 @@ private:
   }
 
   bool cmdUname(const std::vector<String>& args) {
-    out("ESP-Nix 0.9.1.1");
+    out("ESP-Nix 0.9.2.5");
     out("System: ESP32 WROOM32E");
     out("Arch: Xtensa");
     out("Kernel: FreeRTOS");
@@ -1333,7 +1632,7 @@ private:
     std::vector<String> info;
     info.push_back("root@esp-nix");
     info.push_back("------------");
-    info.push_back("OS: ESP-Nix 0.9.1.1");
+    info.push_back("OS: ESP-Nix 0.9.2.5");
     info.push_back("Host: ESP32 WROOM32E");
     info.push_back("Kernel: FreeRTOS");
     info.push_back("Uptime: " + formatUptime(millis() / 1000));

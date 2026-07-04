@@ -1,4 +1,4 @@
-# ESP-Nix v0.9.1.1
+# ESP-Nix v0.9.2.5
 
 A declarative, Unix-like shell operating system for the ESP32 — built from scratch on FreeRTOS, running entirely off an I2C LCD and a serial console (with optional SD card, PS/2 keyboard, and WiFi).
 
@@ -28,6 +28,8 @@ A declarative, Unix-like shell operating system for the ESP32 — built from scr
 - `ntp`/`settz` — WiFi time sync with named-timezone lookup and automatic US DST handling
 - `wifi connect`/`disconnect`/`status`/`toggle`, `ip`, `ping` — a persistent WiFi connection independent of `web`'s connect-then-disconnect lifecycle, so the shell can check status, IP, and host reachability at will
 - `curl [-X METHOD] [-d data] <url>` — basic HTTP/HTTPS client (HTTPS via `WiFiClientSecure::setInsecure()`, no certificate validation)
+- `wget <url> [-O output]` — downloads a URL straight to a file, streaming the response instead of buffering it in RAM
+- `ftp get`/`put`/`ls` — an FTP *client* (not a server) for pushing/pulling files to/from a remote FTP server, `ftp://user:pass@host/path` style URLs
 - OTA updates via `update`, with pre-flight validation (size and firmware-header checks) before touching flash
 
 **Flash usage:** HTTPS support (`WiFiClientSecure`'s TLS stack) added ~140KB to the firmware image — this build sits at 94.7% of the 1.3MB OTA partition (~70KB headroom left). Worth checking before adding anything else substantial.
@@ -67,6 +69,26 @@ The `nixfetch` snapshot on `web`'s file manager page rendered as an empty `<pre>
 ## Bug Fix (v0.9.1.1): backup -m failed on the filesystem root
 
 `backup -m` compresses internal storage root (`/`) directly, but `Archiver::compressZip()` computes a wrapping directory name from the last path segment - for `/` itself, that's an empty string, producing an invalid zip entry name (`/`) that miniz rejects with "Failed to add directory entry: /". Fixed by special-casing root: instead of wrapping everything in a (nonexistent) top-level folder, `/`'s direct children are added to the zip individually, with no wrapping folder at all - which is also the more useful behavior for a backup, since restoring extracts straight back onto `/` without an extra nested layer.
+
+## Bug Fix (v0.9.2.5): `ftp get` crashed with a stack overflow
+
+`ftp get` crashed immediately with "Stack canary watchpoint triggered (loopTask)" - a stack overflow, not a logic bug. The Arduino core's default main-loop task stack (8KB) is tight once the shell's nested command dispatch is combined with a command that puts a sizable object on the stack, like `ESP32_FTPClient` (its internal 1.5KB `clientBuf`, plus other members). Fixed by overriding the core's weak `getArduinoLoopTaskStackSize()` in `main.cpp` to 16KB, giving real headroom for `curl`/`wget`/`ftp` and anything similar added later.
+
+## Bug Fix (v0.9.2.4): `ftp ls` sent a malformed LIST command
+
+Diagnosed via temporary debug logging (v0.9.2.3): the vendored library's `ContentListWithListCommand()` sent `client.print(F("LIST"))` with no trailing space before appending the directory argument, producing a single malformed token like `LIST/` instead of `LIST /` - both tnftpd and pyftpdlib rejected it outright ("500 Command not understood"), which is why `ftp ls` returned nothing. Fixed by adding the missing space (`"LIST "`). Debug verbosity reverted back to 0.
+
+## Bug Fix (v0.9.2.1): failed FTP login silently reported as success
+
+`ESP32_FTPClient::OpenConnection()`'s connected/not-connected flag reflects whichever FTP command ran most recently, not specifically whether login succeeded - and some servers (tnftpd included) reply successfully to the `SYST` command sent right after login regardless of whether `PASS` was actually accepted, silently overwriting a failed login back to "connected". Every `ftp` subcommand would then proceed as if authenticated, doing nothing and printing nothing. Fixed in the vendored copy by capturing the `PASS` response specifically and keeping the connection marked failed if it wasn't accepted, regardless of what runs after it.
+
+## Bug Fix (v0.9.2.1): `ftp ls` memory-unsafe listing
+
+`ftp ls` called the vendored library's `ContentList()`/`ContentListWithListCommand()` passing the address of a single `String` where the library actually expects (and indexes into) an array of `String` objects - one per line of output. With more than one line in a directory listing, this wrote past the single `String`'s memory. Also switched from `MLSD` to the more universally-supported `LIST` command, since `MLSD` isn't implemented by every FTP server (tnftpd included) and was silently returning nothing. Fixed by passing a real `String listing[128]` array and using `ContentListWithListCommand`.
+
+## New in v0.9.2: FTP client, and a vendored/patched library
+
+`ftp get`/`put`/`ls` is built on [`ldab/ESP32_FTPClient`](https://github.com/ldab/ESP32_FTPClient), but its `DownloadFile()` is unsafe for real use: it reads a caller-supplied byte count via `readBytes()` and discards the actual number of bytes read, so it can't distinguish real file data from trailing garbage on a short read, or avoid truncating a longer one - confirmed by the library's own upstream TODO list, which still lists "Implement download" as outstanding. Rather than ship that or skip download entirely, the library is now vendored directly into `src/ftpclient/` (not a `platformio.ini` dependency) with a new method, `DownloadFileToFile()`, that reads from the passive FTP data connection until the server closes it - correct `RETR` semantics - and returns the real byte count. `ftp put` uses the library's existing (correct) upload path unchanged.
 
 ## Hardware
 - ESP32 (required)

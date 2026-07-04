@@ -31,6 +31,8 @@ A minimal declarative operating system for ESP32 with a Unix-like shell interfac
 - **`loop`**: repeats a command a fixed number of times or indefinitely, since the script engine has no real loop construct
 - **`wifi`/`ip`/`ping`**: a persistent WiFi connection (`wifi connect`) that stays up in the background, plus status/IP lookup and host reachability checks
 - **`curl`**: basic HTTP/HTTPS client for scripts and quick API checks
+- **`wget`**: downloads a URL straight to a file
+- **`ftp get`/`put`/`ls`**: FTP client for pushing/pulling files to/from a remote FTP server
 - **`retron`**: runs [Retron](https://github.com/RetroGigabyte/Retron) scripts — real variables, `if`/`loop`/functions, `INPUT`/`OPEN`/`READ`/`WRITE`/`LOAD`/`QUIT`, genuinely new logic beyond what `/system`/`/boot` scripts can sequence
 - **`PATH`**: `/system`-style script directories now configurable (colon-separated) in `/etc/settings/esp-nix.conf`, checked in order for a matching command
 - **`sleep <seconds>`**: pauses, interruptible by any keypress
@@ -90,7 +92,7 @@ After booting, you'll see the shell prompt:
 
 ```
 root@esp-nix:/$ help
-ESP-Nix 0.9.1.1 - Available commands:
+ESP-Nix 0.9.2.5 - Available commands:
   help        - Show this help
   ls [-l] [path] - List directory (-l for permissions/size/date)
   pwd         - Print working directory
@@ -139,6 +141,8 @@ ESP-Nix 0.9.1.1 - Available commands:
   ip            - Show current IP address
   ping <host>   - Ping a host (requires 'wifi connect' first)
   curl [-X METHOD] [-d data] <url> - Basic HTTP client
+  wget <url> [-O output] - Download a URL straight to a file
+  ftp get <ftp://url> [file] | ftp put <file> <ftp://url> | ftp ls <ftp://url>
   retron <file.retro> - Run a Retron language script (variables/loops/if)
   sleep <seconds> - Pause (any key interrupts)
   hostname [-v] | hostname -s <name> - Show/set hostname (prompt + WiFi)
@@ -151,7 +155,7 @@ ESP-Nix 0.9.1.1 - Available commands:
 
 ```bash
 root@esp-nix:/$ uname
-ESP-Nix 0.9.1.1
+ESP-Nix 0.9.2.5
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -192,7 +196,7 @@ A declarative OS for ESP32.
 root@esp-nix:/$ uname > sysinfo.txt
 root@esp-nix:/$ echo "more info" >> sysinfo.txt
 root@esp-nix:/$ cat sysinfo.txt
-ESP-Nix 0.9.1.1
+ESP-Nix 0.9.2.5
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -434,7 +438,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 root@esp-nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 0.9.1.1
+  |:_/ |         OS: ESP-Nix 0.9.2.5
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -628,6 +632,40 @@ root@esp-nix:/$ curl -X POST -d "name=test" https://api.example.com/echo
 `curl [-X METHOD] [-d data] <url>` — defaults to `GET`; `-d` implies `POST` if no `-X` is given, matching real `curl`'s behavior. Needs `wifi connect` run first (or an active `web`/`ntp` session).
 
 **HTTPS doesn't validate certificates** (`WiFiClientSecure::setInsecure()`) — there's no certificate trust store on this device, so any HTTPS server is accepted without verifying its identity. Fine for hobby use and APIs you already trust; don't rely on it for anything security-sensitive. This also costs real flash: pulling in the TLS stack for HTTPS support added roughly 140KB to the firmware image (see version history if you need to check current headroom).
+
+### wget
+
+Downloads a URL straight to a file, streaming the response in chunks rather than buffering the whole body in RAM — reuses the same `HTTPClient`/`WiFiClientSecure` plumbing as `curl`:
+
+```bash
+root@esp-nix:/$ wget http://example.com/firmware.bin
+Saved 45213 bytes to /firmware.bin
+
+root@esp-nix:/$ wget https://example.com/data.json -O mydata.json
+Saved 892 bytes to /mydata.json
+```
+
+`wget <url> [-O output]` — without `-O`, the filename is taken from the last path segment of the URL (falling back to `download` if none is found).
+
+### ftp
+
+An FTP *client* (not a server) for pushing/pulling files to/from a remote FTP server:
+
+```bash
+root@esp-nix:/$ ftp get ftp://user:pass@192.168.1.50/remote/notes.txt
+Saved 128 bytes to /notes.txt
+
+root@esp-nix:/$ ftp put readme.txt ftp://user:pass@192.168.1.50/backup/readme.txt
+Uploaded 341 bytes to /backup/readme.txt
+
+root@esp-nix:/$ ftp ls ftp://user:pass@192.168.1.50/remote
+```
+
+- `ftp get <ftp://url> [localfile]` — without a local filename, it's taken from the last segment of the remote path.
+- `ftp put <localfile> <ftp://url>`
+- `ftp ls <ftp://url>`
+
+Credentials go in the URL (`ftp://user:pass@host/path`); omit them for `anonymous`/no password. Built on a locally-patched copy of [`ldab/ESP32_FTPClient`](https://github.com/ldab/ESP32_FTPClient) (vendored in `src/ftpclient/`, not pulled in as a library dependency) — the upstream library's own `DownloadFile()` reads a caller-supplied byte count via `readBytes()` and discards the actual number of bytes read, so it can't tell real file data from trailing garbage on a short read (and the project's own TODO list confirms download support was never finished). The vendored copy adds `DownloadFileToFile()`, which instead reads from the passive data connection until the server closes it — correct FTP semantics for `RETR` — and returns the real byte count.
 
 ### Partition Layout
 
