@@ -14,7 +14,7 @@ A minimal declarative operating system for ESP32 with a Unix-like shell interfac
 - **Essential commands**: ls, cd, pwd, cat, echo, rm, cp, mv, grep, head, tail, mkdir, touch, clear, uname, whoami, date, df, free, find, wc, du, reboot
 - **Recursive file ops**: `rm -r`, `cp -r`, `mv -r` for directories
 - **Pipes and redirection**: `cmd1 | cmd2`, `>`, `>>`, and `<`
-- **Command history**: recall previous commands with the up/down arrow keys
+- **Command history**: recall previous commands with the up/down arrow keys, persisted to `/data/history.txt` across reboots
 - **Tab completion**: completes command names and filenames
 - **SD card support**: an inserted SD card is mounted at `/sd` alongside the internal LittleFS root
 - **PS/2 keyboard support**: type on a real keyboard alongside (or instead of) the Serial monitor
@@ -85,7 +85,7 @@ After booting, you'll see the shell prompt:
 
 ```
 nix:/$ help
-ESP-Nix 0.7.2 - Available commands:
+ESP-Nix 0.7.3 - Available commands:
   help        - Show this help
   ls [path]   - List directory
   pwd         - Print working directory
@@ -117,7 +117,7 @@ ESP-Nix 0.7.2 - Available commands:
 
 ```bash
 nix:/$ uname
-ESP-Nix 0.7.2
+ESP-Nix 0.7.3
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -158,7 +158,7 @@ A declarative OS for ESP32.
 nix:/$ uname > sysinfo.txt
 nix:/$ echo "more info" >> sysinfo.txt
 nix:/$ cat sysinfo.txt
-ESP-Nix 0.7.2
+ESP-Nix 0.7.3
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -388,7 +388,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 0.7.2
+  |:_/ |         OS: ESP-Nix 0.7.3
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -465,6 +465,21 @@ nix:/$ curl -X POST -d "name=test" https://api.example.com/echo
 `curl [-X METHOD] [-d data] <url>` — defaults to `GET`; `-d` implies `POST` if no `-X` is given, matching real `curl`'s behavior. Needs `wifi connect` run first (or an active `web`/`ntp` session).
 
 **HTTPS doesn't validate certificates** (`WiFiClientSecure::setInsecure()`) — there's no certificate trust store on this device, so any HTTPS server is accepted without verifying its identity. Fine for hobby use and APIs you already trust; don't rely on it for anything security-sensitive. This also costs real flash: pulling in the TLS stack for HTTPS support added roughly 140KB to the firmware image (see version history if you need to check current headroom).
+
+### Persistent Command History
+
+Up/Down arrow history now survives a reboot — every new entry is saved to `/data/history.txt`, and it's read back in at boot before the prompt appears:
+
+```bash
+nix:/$ echo hello
+hello
+nix:/$ reboot
+...
+nix:/$ [press Up]
+echo hello
+```
+
+Capped at the same 30-entry limit as in-memory history always had; the file is just rewritten in full on every new command (cheap at this size). Deleting `/data/history.txt` clears history permanently, same as it clearing in-memory on a fresh boot used to.
 
 ### WiFi File Server + Browser Terminal
 

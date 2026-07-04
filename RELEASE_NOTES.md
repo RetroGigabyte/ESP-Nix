@@ -1,4 +1,4 @@
-# ESP-Nix v0.7.2
+# ESP-Nix v0.7.3
 
 A declarative, Unix-like shell operating system for the ESP32 — built from scratch on FreeRTOS, running entirely off an I2C LCD and a serial console (with optional SD card, PS/2 keyboard, and WiFi).
 
@@ -7,7 +7,7 @@ A declarative, Unix-like shell operating system for the ESP32 — built from scr
 ## Shell
 - Full command set: `ls` (with `-l`), `cd`, `cat`, `cp`/`mv` (recursive, glob-aware, directory-destination-aware), `rm -r`, `grep`, `head`, `tail`, `find`, `wc`, `du`, `mkdir`, `touch`, `echo`, and more
 - Pipes, `&&`/`||`/`;` operators, `>`/`>>`/`<` redirection, `$VAR` expansion, `VAR=value` assignment
-- Command history (arrow keys) and tab completion
+- Command history (arrow keys) and tab completion, persisted to `/data/history.txt` across reboots (30-entry cap)
 - `test`/`[` builtin for basic conditionals
 - A handful of `/proc` virtual files (`meminfo`, `uptime`, `cpuinfo`, `version`)
 

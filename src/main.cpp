@@ -75,6 +75,10 @@ void setup() {
     fsys.createDir("/etc/settings");
   }
 
+  if (!fsys.exists("/data")) {
+    fsys.createDir("/data");
+  }
+
   // Migrate config from its old location (/etc/esp-nix.conf) for devices
   // upgrading via OTA, so saved WiFi credentials etc. aren't lost.
   if (fsys.exists("/etc/esp-nix.conf") && !fsys.exists("/etc/settings/esp-nix.conf")) {
@@ -157,6 +161,9 @@ void setup() {
 
   // Run any startup scripts in /boot, in order (like /etc/init.d)
   shell.runBootScripts();
+
+  // Restore command history from /data/history.txt, if any exists
+  shell.loadHistory();
 
   delay(1000);
   term.clear();

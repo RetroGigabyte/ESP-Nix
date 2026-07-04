@@ -42,6 +42,38 @@ public:
     return executeCommand(line);
   }
 
+  // Loads saved history from /data/history.txt, if present. Called once
+  // at boot (after /data is guaranteed to exist), so history survives a
+  // reboot instead of starting empty every time.
+  void loadHistory() {
+    history.clear();
+
+    String content = fs.readFile("/data/history.txt");
+    String line = "";
+    for (size_t i = 0; i < content.length(); i++) {
+      char c = content[i];
+      if (c == '\n') {
+        if (line.length() > 0) history.push_back(line);
+        line = "";
+      } else if (c != '\r') {
+        line += c;
+      }
+    }
+    if (line.length() > 0) history.push_back(line);
+
+    while (history.size() > (size_t)MAX_HISTORY) {
+      history.erase(history.begin());
+    }
+  }
+
+  // Rewrites the whole history file from the in-memory list - simple and
+  // safe at this scale (MAX_HISTORY caps it at 30 short lines).
+  void saveHistoryFile() {
+    String content = "";
+    for (const auto& cmd : history) content += cmd + "\n";
+    fs.writeFile("/data/history.txt", content);
+  }
+
   void setVariables(Variables* v) {
     varsPtr = v;
     commands.setVariables(v);
@@ -64,7 +96,7 @@ public:
   }
 
   void init() {
-    term.println("ESP-Nix 0.7.2");
+    term.println("ESP-Nix 0.7.3");
     term.println("Type 'help' for command list\n");
   }
 
@@ -336,6 +368,7 @@ public:
     if (history.size() > MAX_HISTORY) {
       history.erase(history.begin());
     }
+    saveHistoryFile();
   }
 
   void handleTabComplete() {
