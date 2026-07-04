@@ -89,10 +89,10 @@ pio device monitor
 After booting, you'll see the shell prompt:
 
 ```
-root@nix:/$ help
+root@esp-nix:/$ help
 ESP-Nix 0.9.1.1 - Available commands:
   help        - Show this help
-  ls [path]   - List directory
+  ls [-l] [path] - List directory (-l for permissions/size/date)
   pwd         - Print working directory
   cd [path]   - Change directory
   cat [file]  - Display file contents
@@ -106,63 +106,92 @@ ESP-Nix 0.9.1.1 - Available commands:
   tail [f] [n]- Show last n lines (default 10)
   mkdir [d]   - Create directory
   clear       - Clear screen
-  edit [f]    - Edit file (:!q to save)
+  edit [f]    - Edit file (:!q save, :d<n> delete, :i<n> insert)
+                arrows move cursor/lines, Up/Down reopen a line
   ./[script]  - Execute shell script
   uname [opt] - System information
   whoami      - Current user
-  date        - Current date/time
+  date        - Current date/time (DATE_FORMAT/TIME_FORMAT in settings)
   df          - Disk free space
   free        - Free memory
   exit        - Exit shell
   cmd > file  - Redirect output (overwrite)
   cmd >> file - Redirect output (append)
+  nixos-rebuild - Re-apply /etc/settings/esp-nix.conf
+  webserver   - Start WiFi file server for the SD card (or 'web')
+  web -join -list          - Scan and list nearby WiFi networks
+  web -join <n> -pass=PW   - Join network #n from the last scan
+  update [file] - Flash firmware from a .esp_update file
+                  (auto-finds one on /sd or / if no path given)
+  rm -r / cp -r / mv -r [dir] - Recursive directory ops
+  find [path] [pattern] - Search for files/dirs by name
+  wc [file]   - Count lines/words/bytes
+  du [path]   - Show total size of a file or directory
+  reboot      - Restart the system
+  ntp         - Sync clock over WiFi (also happens on 'web -join')
+  extract [archive] [destdir] - Unzip/untar (.zip .tar.gz .tgz .gz .tar)
+  compress [source] [archive] - Zip/tar/gzip a file or directory
+  test/[ EXPR ] - -e/-f/-d exists/file/dir, =/!=, -eq/-ne/-lt/-gt
+  settz <name>  - Set TZ_OFFSET by timezone name (settz -list)
+  nixfetch      - System summary with a logo (edit /etc/settings/logo.txt)
+  loop <count|inf> [-i secs] <cmd...> - Repeat a command (any key stops it)
+  wifi status|connect|disconnect|toggle - Persistent WiFi connection (stays up between commands)
+  ip            - Show current IP address
+  ping <host>   - Ping a host (requires 'wifi connect' first)
+  curl [-X METHOD] [-d data] <url> - Basic HTTP client
+  retron <file.retro> - Run a Retron language script (variables/loops/if)
+  sleep <seconds> - Pause (any key interrupts)
+  hostname [-v] | hostname -s <name> - Show/set hostname (prompt + WiFi)
+  backup -m|-l|-r# - Back up/list/restore internal storage to/from SD
+  cat /proc/{version,uptime,meminfo,cpuinfo} - Virtual system info
+  /system/*.sh files run anywhere by name (no ./ or .sh)
 ```
 
 ### Example Commands
 
 ```bash
-nix:/$ uname
+root@esp-nix:/$ uname
 ESP-Nix 0.9.1.1
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
 Flash: 4MB | RAM: 520KB SRAM (~300KB usable after reserved regions)
 
-nix:/$ ls
+root@esp-nix:/$ ls
 readme.txt
 system
 
-nix:/$ pwd
+root@esp-nix:/$ pwd
 /
 
-nix:/$ cd system
-nix:/system$ mkdir data
-nix:/system$ touch data/log.txt
-nix:/system$ cat ../readme.txt
+root@esp-nix:/$ cd system
+root@esp-nix:/system$ mkdir data
+root@esp-nix:/system$ touch data/log.txt
+root@esp-nix:/system$ cat ../readme.txt
 Welcome to ESP-Nix!
 A declarative OS for ESP32.
 
-nix:/system$ df
+root@esp-nix:/system$ df
 Filesystem  Size   Used Available Use%
 SPIFFS      1MB   100KB   900KB    10%
 
-nix:/system$ free
+root@esp-nix:/system$ free
 Total: 320 KB | Used: 150 KB | Free: 170 KB
 
-nix:/$ cp readme.txt backup.txt
-nix:/$ mv backup.txt archive.txt
-nix:/$ grep Welcome readme.txt
+root@esp-nix:/$ cp readme.txt backup.txt
+root@esp-nix:/$ mv backup.txt archive.txt
+root@esp-nix:/$ grep Welcome readme.txt
 Welcome to ESP-Nix!
 
-nix:/$ head readme.txt 1
+root@esp-nix:/$ head readme.txt 1
 Welcome to ESP-Nix!
 
-nix:/$ tail readme.txt 1
+root@esp-nix:/$ tail readme.txt 1
 A declarative OS for ESP32.
 
-nix:/$ uname > sysinfo.txt
-nix:/$ echo "more info" >> sysinfo.txt
-nix:/$ cat sysinfo.txt
+root@esp-nix:/$ uname > sysinfo.txt
+root@esp-nix:/$ echo "more info" >> sysinfo.txt
+root@esp-nix:/$ cat sysinfo.txt
 ESP-Nix 0.9.1.1
 System: ESP32 WROOM32E
 Arch: Xtensa
@@ -170,21 +199,21 @@ Kernel: FreeRTOS
 Flash: 4MB | RAM: 520KB SRAM (~300KB usable after reserved regions)
 more info
 
-nix:/$ cat readme.txt | grep Welcome
+root@esp-nix:/$ cat readme.txt | grep Welcome
 Welcome to ESP-Nix!
 
-nix:/$ grep Welcome < readme.txt
+root@esp-nix:/$ grep Welcome < readme.txt
 Welcome to ESP-Nix!
 
-nix:/$ cat readme.txt | grep declarative > matches.txt
+root@esp-nix:/$ cat readme.txt | grep declarative > matches.txt
 ```
 
 ### Recursive File Operations
 
 ```bash
-nix:/$ cp -r /system /data/system-backup
-nix:/$ mv -r /data/system-backup /data/system-backup-2
-nix:/$ rm -r /data/system-backup-2
+root@esp-nix:/$ cp -r /system /data/system-backup
+root@esp-nix:/$ mv -r /data/system-backup /data/system-backup-2
+root@esp-nix:/$ rm -r /data/system-backup-2
 ```
 
 `rm`, `cp`, and `mv` refuse to touch a directory unless you pass `-r` — same as real Unix tools warning you before deleting a whole tree.
@@ -198,14 +227,14 @@ If a glob matches more than one file and the destination doesn't exist yet, it's
 ### find, wc, du
 
 ```bash
-nix:/$ find / .sh
+root@esp-nix:/$ find / .sh
 /system/hello.sh
 /system/web.sh
 
-nix:/$ wc readme.txt
+root@esp-nix:/$ wc readme.txt
       2      10     52
 
-nix:/$ du /system
+root@esp-nix:/$ du /system
    234B	/system
 ```
 
@@ -216,23 +245,23 @@ nix:/$ du /system
 If an SD card is inserted at boot, it's mounted at `/sd` and works with every existing command — `ls`, `cat`, `cp`, `edit`, redirection, all of it:
 
 ```bash
-nix:/$ ls
+root@esp-nix:/$ ls
 readme.txt
 system
 sd
 
-nix:/$ cd sd
-nix:/sd$ touch notes.txt
-nix:/sd$ echo "hello from SD" > notes.txt
-nix:/sd$ cat notes.txt
+root@esp-nix:/$ cd sd
+root@esp-nix:/sd$ touch notes.txt
+root@esp-nix:/sd$ echo "hello from SD" > notes.txt
+root@esp-nix:/sd$ cat notes.txt
 hello from SD
 
-nix:/sd$ cp notes.txt /backup.txt
-nix:/sd$ cd /
-nix:/$ cat backup.txt
+root@esp-nix:/sd$ cp notes.txt /backup.txt
+root@esp-nix:/sd$ cd /
+root@esp-nix:/$ cat backup.txt
 hello from SD
 
-nix:/$ df
+root@esp-nix:/$ df
 Filesystem  Size   Used Available Use%
 LittleFS    1024KB  4KB  1020KB      0%
 SD          7580MB  12MB  7568MB      0%
@@ -252,7 +281,7 @@ If no card is inserted, `/sd` simply doesn't appear in `ls /` and boot proceeds 
 - **By line number**: `:d<n>` deletes line n, `:i<n>` inserts a new line before line n:
 
 ```bash
-nix:/$ edit notes.txt
+root@esp-nix:/$ edit notes.txt
 --- Edit Mode ---
 Commands: :!q save+quit  :d<n> delete line n  :i<n> insert before n
 1: hello world
@@ -303,13 +332,13 @@ TIME_FORMAT=24
 All settings, not just WiFi/timezone, live under `/etc/settings/` now — a dedicated home for configuration separate from `/etc` in general, so it's easy to find and back up as a unit (`compress /etc/settings settings-backup.zip`). Devices upgrading from an older firmware version have their existing `/etc/esp-nix.conf` migrated automatically on first boot after the update — nothing to redo by hand.
 
 ```bash
-nix:/$ date
+root@esp-nix:/$ date
 7/3/2027 15:04:05
 
-nix:/$ edit /etc/settings/esp-nix.conf
+root@esp-nix:/$ edit /etc/settings/esp-nix.conf
 # change DATE_FORMAT=iso and TIME_FORMAT=12
-nix:/$ nixos-rebuild
-nix:/$ date
+root@esp-nix:/$ nixos-rebuild
+root@esp-nix:/$ date
 2027/7/3 3:04:05 PM
 ```
 
@@ -318,7 +347,7 @@ Changing `TZ_OFFSET` takes effect on the very next `date` call too, without need
 **Setting `TZ_OFFSET` by name instead of computing seconds by hand:**
 
 ```bash
-nix:/$ settz -list
+root@esp-nix:/$ settz -list
 pacific,-28800,-25200
 mountain,-25200,-21600
 central,-21600,-18000
@@ -328,7 +357,7 @@ hawaii,-36000,-36000
 utc,0,0
 gmt,0,0
 
-nix:/$ settz pacific
+root@esp-nix:/$ settz pacific
 Timezone set to pacific (DST): TZ_OFFSET=-25200
 ```
 
@@ -339,8 +368,8 @@ The lookup table is a plain editable file, not compiled into firmware — add yo
 Edit it like any other file, then re-apply it without rebooting:
 
 ```bash
-nix:/$ edit /etc/settings/esp-nix.conf
-nix:/$ nixos-rebuild
+root@esp-nix:/$ edit /etc/settings/esp-nix.conf
+root@esp-nix:/$ nixos-rebuild
 Applying /etc/settings/esp-nix.conf ...
 --- Executing: /etc/settings/esp-nix.conf ---
 [6] GREETING=Welcome to ESP-Nix
@@ -355,22 +384,22 @@ Rebuild complete.
 Any `.sh` file placed in `/system` becomes runnable from anywhere on the system, just by typing its name — no `./` prefix, no `.sh` extension, and it works from any current directory:
 
 ```bash
-nix:/$ edit /system/hello.sh
+root@esp-nix:/$ edit /system/hello.sh
 1: echo Hello from a system command!
 2: :!q
 Saved.
 
-nix:/$ cd /data
-nix:/data$ hello
+root@esp-nix:/$ cd /data
+root@esp-nix:/data$ hello
 Hello from a system command!
 ```
 
 If a name doesn't match a built-in command, the shell checks each directory listed in `PATH` (in `/etc/settings/esp-nix.conf`, colon-separated, defaults to just `/system`) for a matching `<name>.sh`, in order — same convention as a real Unix `PATH`:
 
 ```bash
-nix:/$ edit /etc/settings/esp-nix.conf
+root@esp-nix:/$ edit /etc/settings/esp-nix.conf
 # add: PATH=/system:/data/scripts
-nix:/$ nixos-rebuild
+root@esp-nix:/$ nixos-rebuild
 ```
 
 Now a script in `/data/scripts` is runnable by name too, checked after `/system`.
@@ -380,12 +409,12 @@ Now a script in `/data/scripts` is runnable by name too, checked after `/system`
 Any `.sh` file placed in `/boot` runs automatically at every startup, in alphabetical order — the ESP-Nix equivalent of `/etc/init.d`. Runs after `/etc/settings/esp-nix.conf` and the boot-time NTP sync, so scripts can rely on variables/directories from the config and a correct clock already being in place.
 
 ```bash
-nix:/$ edit /boot/01-greet.sh
+root@esp-nix:/$ edit /boot/01-greet.sh
 1: echo Booted at $(date)
 2: :!q
 Saved.
 
-nix:/$ reboot
+root@esp-nix:/$ reboot
 ...
 [1] echo Booted at $(date)
 Booted at 2026-07-03 15:32:10
@@ -402,7 +431,7 @@ If a WiFi network is already saved (`web -join` sets `WIFI_SSID`/`WIFI_PASS`), t
 A neofetch-style system summary — logo on the left, live stats on the right:
 
 ```
-nix:/$ nixfetch
+root@esp-nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
   |:_/ |         OS: ESP-Nix 0.9.1.1
@@ -423,12 +452,12 @@ The logo isn't compiled into firmware — it's read live from `/etc/settings/log
 Repeats a command, since the script engine has no real loop construct (no `if`/`for` — just a flat sequence of commands):
 
 ```bash
-nix:/$ loop 3 echo hi
+root@esp-nix:/$ loop 3 echo hi
 hi
 hi
 hi
 
-nix:/$ loop inf -i 5 date
+root@esp-nix:/$ loop inf -i 5 date
 7/3/2027 3:04:05 PM
 7/3/2027 3:04:10 PM
 7/3/2027 3:04:15 PM
@@ -442,7 +471,7 @@ Loop stopped.
 Runs scripts in [Retron](https://github.com/RetroGigabyte/Retron), a small language with real variables, `if`/`else`, `loop`, and functions — genuinely new logic on top of what's built in, not just sequences of existing commands (unlike `/system`/`/boot` scripts, which can only combine what the shell already has).
 
 ```bash
-nix:/$ retron test.retro
+root@esp-nix:/$ retron test.retro
 Retron on ESP-Nix!
 sum is 7
 looping
@@ -475,7 +504,7 @@ Variables use a `/name` prefix, `&` concatenates strings, `[expr]` embeds an exp
 **`INPUT key` reads a line from Serial/PS2 into a variable**, storing it as raw text (separate from the numeric `/x = 5` style variables) so typed strings interpolate correctly in `print`, while still working in arithmetic if the input was a number:
 
 ```bash
-nix:/$ retron input.retro
+root@esp-nix:/$ retron input.retro
 [types: Richard]
 You entered: Richard
 ```
@@ -503,12 +532,12 @@ The shell prompt shows the current user and hostname (`root@esp-nix:/$` instead 
 `hostname` shows or sets the `HOSTNAME` variable, which is also applied as the actual WiFi hostname (via `WiFi.setHostname()`/`softAPsetHostname()`) the next time the device connects — so it shows up correctly in your router's client list instead of a generic name:
 
 ```bash
-nix:/$ hostname
+root@esp-nix:/$ hostname
 esp-nix
 
-nix:/$ hostname -s my-esp32
+root@esp-nix:/$ hostname -s my-esp32
 Hostname set to my-esp32 (takes effect on next WiFi connect)
-nix:/$ hostname -v
+root@esp-nix:/$ hostname -v
 my-esp32
 ```
 
@@ -517,7 +546,7 @@ my-esp32
 Pauses for a fixed number of seconds, interruptible by any keypress:
 
 ```bash
-nix:/$ sleep 5
+root@esp-nix:/$ sleep 5
 ```
 
 ### backup
@@ -525,14 +554,14 @@ nix:/$ sleep 5
 Backs up internal LittleFS ("user space" — `/etc/settings`, `/boot`, `/system`, `/data`, everything that isn't part of the compiled firmware itself) to the SD card as `hostname-YYYYMMDD-HHMMSS.esp_bak`:
 
 ```bash
-nix:/$ backup -m
+root@esp-nix:/$ backup -m
 Backup created: /sd/backups/esp-nix-20260704-093015.esp_bak
 
-nix:/$ backup -l
+root@esp-nix:/$ backup -l
 1) esp-nix-20260704-093015.esp_bak
 2) esp-nix-20260705-141022.esp_bak
 
-nix:/$ backup -r 1
+root@esp-nix:/$ backup -r 1
 Restored esp-nix-20260704-093015.esp_bak - run 'nixos-rebuild' or reboot to reload config into the running shell.
 ```
 
@@ -547,25 +576,25 @@ Restored esp-nix-20260704-093015.esp_bak - run 'nixos-rebuild' or reboot to relo
 Every other WiFi operation (`web`, `web -join`, `ntp`) connects, does one thing, and explicitly disconnects and powers the radio off again — there's normally no window where WiFi is up and the shell is free to run something else. `wifi connect` is different: it joins a network and leaves it connected in the background, so `ip`/`ping`/`wifi status` have something to report.
 
 ```bash
-nix:/$ wifi connect
+root@esp-nix:/$ wifi connect
 Joining MyHomeNetwork ...
 Joined MyHomeNetwork - IP: 192.168.1.42
 WiFi stays connected in the background - use 'wifi disconnect' to stop.
 
-nix:/$ ip
+root@esp-nix:/$ ip
 192.168.1.42
 
-nix:/$ wifi status
+root@esp-nix:/$ wifi status
 SSID: MyHomeNetwork
 IP: 192.168.1.42
 RSSI: -52dBm
 MAC: 24:6F:28:AA:BB:CC
 
-nix:/$ ping 8.8.8.8
+root@esp-nix:/$ ping 8.8.8.8
 Pinging 8.8.8.8 ...
 Reply from 8.8.8.8: avg 23.4ms
 
-nix:/$ wifi disconnect
+root@esp-nix:/$ wifi disconnect
 WiFi disconnected.
 ```
 
@@ -574,11 +603,11 @@ WiFi disconnected.
 `wifi toggle` flips between the two: connects (using the saved network) if currently off, disconnects if currently on:
 
 ```bash
-nix:/$ wifi toggle
+root@esp-nix:/$ wifi toggle
 WiFi was off - connecting...
 Joined MyHomeNetwork - IP: 192.168.1.42
 
-nix:/$ wifi toggle
+root@esp-nix:/$ wifi toggle
 WiFi was on - disconnecting...
 WiFi disconnected.
 ```
@@ -588,11 +617,11 @@ WiFi disconnected.
 A basic HTTP client, using the ESP32 Arduino core's built-in `HTTPClient`/`WiFiClientSecure` (no extra library needed):
 
 ```bash
-nix:/$ wifi connect
-nix:/$ curl http://api.example.com/status
+root@esp-nix:/$ wifi connect
+root@esp-nix:/$ curl http://api.example.com/status
 {"status":"ok"}
 
-nix:/$ curl -X POST -d "name=test" https://api.example.com/echo
+root@esp-nix:/$ curl -X POST -d "name=test" https://api.example.com/echo
 {"received":{"name":"test"}}
 ```
 
@@ -624,11 +653,11 @@ ESP-Nix uses two 1.875MB OTA slots (`min_spiffs.csv`) instead of the ESP32 Ardui
 Up/Down arrow history now survives a reboot — every new entry is saved to `/data/history.txt`, and it's read back in at boot before the prompt appears:
 
 ```bash
-nix:/$ echo hello
+root@esp-nix:/$ echo hello
 hello
-nix:/$ reboot
+root@esp-nix:/$ reboot
 ...
-nix:/$ [press Up]
+root@esp-nix:/$ [press Up]
 echo hello
 ```
 
@@ -643,7 +672,7 @@ Requires an SD card. Start it with `webserver` or the shorter `web` (a `/system/
 **Folders are downloadable too**, zipped on the fly: clicking Download on a folder compresses it with the same `Archiver` `extract`/`compress` uses, streams the resulting `.zip`, then deletes the temporary file — there's no way to send a folder directly over HTTP, so this is the only option.
 
 ```bash
-nix:/$ web
+root@esp-nix:/$ web
 Web server running (files + terminal)
 WiFi: ESP-Nix / esp32nix
 Browse to: http://192.168.4.1
@@ -652,7 +681,7 @@ Press any key to stop.
 
 The ESP32 starts its own WiFi access point (SSID/password from `WEB_SSID`/`WEB_PASS` in `/etc/settings/esp-nix.conf`, edit and run `nixos-rebuild` to change them). Connect your phone or computer to that network, then open the printed address in a browser to drag-and-drop upload files, download, or delete them — straight to/from `/sd`.
 
-**A real terminal, from any browser.** Click "Open Terminal" (or go to `/shell`) for a page where you can type shell commands and see their output — works from a phone, no app needed. It runs through the exact same processing as the Serial/PS2 prompt (`$VAR` expansion, `VAR=value` assignment, pipes, `&&`/`||`/`;`, `>`/`>>` redirection all work), and the prompt shown (`nix:/sd$`) tracks the current directory just like the console does, updating after `cd`.
+**A real terminal, from any browser.** Click "Open Terminal" (or go to `/shell`) for a page where you can type shell commands and see their output — works from a phone, no app needed. It runs through the exact same processing as the Serial/PS2 prompt (`$VAR` expansion, `VAR=value` assignment, pipes, `&&`/`||`/`;`, `>`/`>>` redirection all work), and the prompt shown (`root@esp-nix:/sd$`) tracks the current directory just like the console does, updating after `cd`.
 
 The one real difference: each command is a single request/response (type it, press Enter, see the output appended below) rather than a live streaming session — there's no continuous keystroke channel over plain HTTP. That means anything that needs to read further keystrokes after you press Enter won't work here: the full-screen `edit` command, or a `web -join -list` prompt waiting for a network number. Use Serial or PS2 for those; everything else behaves identically.
 
@@ -663,21 +692,21 @@ Pressing any key at the ESP-Nix console (Serial or PS/2) stops the server and re
 **Joining your home WiFi instead of the ESP's own hotspot:**
 
 ```bash
-nix:/$ web -join -list
+root@esp-nix:/$ web -join -list
 Scanning for WiFi networks...
  1) MyHomeNetwork              -52dBm secured
  2) Neighbors5G                -71dBm secured
  3) CoffeeShopFree              -60dBm open
 Join with: web -join <number> -pass=PASSWORD
 
-nix:/$ web -join 1 -pass=THE_PASSWORD
+root@esp-nix:/$ web -join 1 -pass=THE_PASSWORD
 Joining MyHomeNetwork ...
 Joined MyHomeNetwork - IP: 192.168.1.42
 Syncing time...
 Time synced: 2026-07-03 13:24:07
 Saved - future 'web' runs will join this network automatically.
 
-nix:/$ web
+root@esp-nix:/$ web
 Web file server running
 Joined WiFi: MyHomeNetwork
 Browse to: http://192.168.1.42
@@ -691,12 +720,12 @@ Once joined, the credentials are saved to `WIFI_SSID`/`WIFI_PASS` in `/etc/setti
 `date` reads a clock the ESP32 has no way to set on its own — it needs to be told the actual time from somewhere. `web -join` does this automatically the moment it connects. To sync on demand (using the saved `WIFI_SSID`, connecting briefly if not already online):
 
 ```bash
-nix:/$ ntp
+root@esp-nix:/$ ntp
 Connecting to MyHomeNetwork for time sync...
 Syncing time...
 Time synced: 2026-07-03 13:24:07
 
-nix:/$ date
+root@esp-nix:/$ date
 2026-07-03 13:24:11
 ```
 
@@ -707,16 +736,16 @@ Set `TZ_OFFSET` in `/etc/settings/esp-nix.conf` (seconds from UTC, e.g. `-18000`
 `extract` unpacks `.zip`, `.tar.gz`/`.tgz`, `.gz`, and `.tar` archives; `compress` creates them. Real `.zip` files (the kind macOS/Windows create) go through a vendored copy of [miniz](https://github.com/richgel999/miniz); the tar-based formats go through [ESP32-targz](https://github.com/tobozo/ESP32-targz). Both stream through the archive rather than loading it into RAM, so size is limited by free space on the filesystem, not by the ESP32's ~300KB of usable RAM.
 
 ```bash
-nix:/$ extract project.zip
+root@esp-nix:/$ extract project.zip
 Extracted 12 file(s) to /
 
-nix:/$ extract backup.tar.gz /data
+root@esp-nix:/$ extract backup.tar.gz /data
 Extracted to /data
 
-nix:/$ compress /system system-backup.zip
+root@esp-nix:/$ compress /system system-backup.zip
 Created system-backup.zip (8 file(s))
 
-nix:/$ compress readme.txt readme.txt.gz
+root@esp-nix:/$ compress readme.txt readme.txt.gz
 Created readme.txt.gz (312 bytes)
 ```
 
@@ -737,7 +766,7 @@ Created readme.txt.gz (312 bytes)
 Build your firmware normally (`pio run`), rename `.pio/build/esp32dev/firmware.bin` to something ending in `.esp_update`, then push it to the SD card with `web`. Flash it from the shell:
 
 ```bash
-nix:/$ update
+root@esp-nix:/$ update
 Flashing /sd/firmware.esp_update (961184 bytes)...
 20%
 41%
@@ -753,7 +782,7 @@ Update successful. Rebooting...
 **Safety checks before flashing:** `update` refuses to touch the flash if the file is under 64KB (too small to be real firmware — almost certainly the wrong file or a truncated download) or doesn't start with the `0xE9` magic byte every ESP32 firmware image has. Both checks run before a single byte is written, so a bad file just gets rejected with a clear message instead of bricking the running firmware partway through:
 
 ```bash
-nix:/$ update wrong-file.esp_update
+root@esp-nix:/$ update wrong-file.esp_update
 Refusing to flash /sd/wrong-file.esp_update: missing ESP32 firmware
 header (0xE9 magic byte) - not a valid firmware image
 ```
@@ -768,7 +797,7 @@ header (0xE9 magic byte) - not a valid firmware image
 Create and run shell scripts with `edit` and `./`:
 
 ```bash
-nix:/$ edit setup.sh
+root@esp-nix:/$ edit setup.sh
 --- Edit Mode ---
 1: mkdir data
 2: touch data/config.txt
@@ -776,7 +805,7 @@ nix:/$ edit setup.sh
 4: :!q
 File saved: /setup.sh
 
-nix:/$ ./setup.sh
+root@esp-nix:/$ ./setup.sh
 --- Executing: ./setup.sh ---
 [1] mkdir data
 [2] touch data/config.txt
