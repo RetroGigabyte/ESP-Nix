@@ -18,6 +18,22 @@
 #include <WiFiClientSecure.h>
 #include "ftpclient/ESP32_FTPClient.h"
 #include "esp_heap_caps.h"
+#include "elfloader.h"
+
+// The firmware-exported symbol table for runmod: functions a loaded
+// module's undefined external references can be resolved against. Must
+// be declared extern "C" so the linker uses the plain, unmangled name a
+// C object file would reference (e.g. "host_print", not some C++-mangled
+// form) - this is what lets a module's `extern void host_print(int);`
+// resolve correctly.
+extern "C" void host_print(int value) {
+  Serial.println("[runmod host_print] " + String(value));
+}
+
+static const ExportedSymbol kRunmodSymbols[] = {
+  {"host_print", (void*)host_print},
+  {nullptr, nullptr}
+};
 
 class Commands {
 private:
@@ -68,7 +84,7 @@ public:
       "grep", "head", "tail", "mkdir", "clear", "edit", "env", "uname",
       "whoami", "date", "df", "free", "nixos-rebuild", "webserver", "update",
       "find", "wc", "du", "reboot", "ntp", "extract", "compress", "test", "settz", "nixfetch", "loop",
-      "wifi", "ip", "ping", "curl", "wget", "ftp", "mkali", "rmali", "ls-ali", "runelf", "retron", "sleep", "hostname", "backup", "exit"
+      "wifi", "ip", "ping", "curl", "wget", "ftp", "mkali", "rmali", "ls-ali", "runelf", "runmod", "retron", "sleep", "hostname", "backup", "exit"
     };
     return names;
   }
@@ -157,6 +173,7 @@ private:
     if (cmd == "rmali") return cmdRmali(args);
     if (cmd == "ls-ali") return cmdLsAli(args);
     if (cmd == "runelf") return cmdRunelf(args);
+    if (cmd == "runmod") return cmdRunmod(args);
     if (cmd == "retron") return cmdRetron(args);
     if (cmd == "sleep") return cmdSleep(args);
     if (cmd == "hostname") return cmdHostname(args);
@@ -1046,6 +1063,53 @@ private:
     return true;
   }
 
+  // runmod <path.o> <function> [a] [b] - stage-2 native-code loader.
+  // Unlike runelf (which needs a bare .text dump with zero relocations),
+  // this loads a genuine .o file, resolves calls to firmware-exported
+  // functions (see kRunmodSymbols above), and calls a named function
+  // within it by symbol name. This is the real prerequisite for loading
+  // anything nontrivial from SD - proves relocation + symbol resolution
+  // work, not just "copy bytes and jump" like runelf.
+  bool cmdRunmod(const std::vector<String>& args) {
+    if (args.size() < 3) {
+      term.println("Usage: runmod <path.o> <function> [a] [b]");
+      term.println("With a and b: calls <function> as int(int,int).");
+      term.println("With neither: calls it as int().");
+      return true;
+    }
+
+    String path = fs.resolvePath(args[1]);
+    String funcName = args[2];
+    bool hasArgs = args.size() >= 5;
+    int a = hasArgs ? args[3].toInt() : 0;
+    int b = hasArgs ? args[4].toInt() : 0;
+
+    if (!fs.exists(path)) {
+      term.println("runmod: no such file: " + path);
+      return true;
+    }
+
+    ElfModule mod(fs, term);
+    if (!mod.load(path, kRunmodSymbols)) {
+      return true;  // load() already printed a specific error
+    }
+
+    if (!mod.hasFunction(funcName)) {
+      term.println("runmod: no such function: " + funcName);
+      return true;
+    }
+
+    int result;
+    bool ok = hasArgs ? mod.callInt2(funcName, a, b, result) : mod.callInt0(funcName, result);
+    if (!ok) {
+      term.println("runmod: call failed");
+      return true;
+    }
+
+    term.println("Result: " + String(result));
+    return true;
+  }
+
   // Runs a .retro script (RetroGigabyte/Retron language), ported from
   // that project's reference interpreter. DRAW errors clearly rather
   // than silently no-op'ing, since composite video output isn't wired up
@@ -1479,7 +1543,7 @@ private:
   }
 
   bool cmdHelp(const std::vector<String>& args) {
-    out("ESP-Nix 1.0.2 - Available commands:");
+    out("ESP-Nix 1.1 - Available commands:");
     out("  help        - Show this help");
     out("  ls [-l] [path] - List directory (-l for permissions/size/date)");
     out("  pwd         - Print working directory");
@@ -1534,6 +1598,7 @@ private:
     out("  rmali <name> - Remove an alias created by mkali");
     out("  ls-ali - List aliases (what each runs, and whether it's set to run at boot)");
     out("  runelf <path> [a] [b] - Run a self-contained compiled Xtensa function (stage 1, see README)");
+    out("  runmod <path.o> <fn> [a] [b] - Run a .o with real relocations/symbol resolution (stage 2, see README)");
     out("  retron <file.retro> - Run a Retron language script (variables/loops/if)");
     out("  sleep <seconds> - Pause (any key interrupts)");
     out("  hostname [-v] | hostname -s <name> - Show/set hostname (prompt + WiFi)");
@@ -1631,7 +1696,7 @@ private:
   // info as readable pseudo-files rather than only via commands.
   bool getProcContent(const String& path, String& content) {
     if (path == "/proc/version") {
-      content = "ESP-Nix version 1.0.2 (FreeRTOS) Xtensa\n";
+      content = "ESP-Nix version 1.1 (FreeRTOS) Xtensa\n";
       return true;
     }
     if (path == "/proc/uptime") {
@@ -1797,7 +1862,7 @@ private:
   }
 
   bool cmdUname(const std::vector<String>& args) {
-    out("ESP-Nix 1.0.2");
+    out("ESP-Nix 1.1");
     out("System: ESP32 WROOM32E");
     out("Arch: Xtensa");
     out("Kernel: FreeRTOS");
@@ -1849,7 +1914,7 @@ private:
     std::vector<String> info;
     info.push_back("root@esp-nix");
     info.push_back("------------");
-    info.push_back("OS: ESP-Nix 1.0.2");
+    info.push_back("OS: ESP-Nix 1.1");
     info.push_back("Host: ESP32 WROOM32E");
     info.push_back("Kernel: FreeRTOS");
     info.push_back("Uptime: " + formatUptime(millis() / 1000));

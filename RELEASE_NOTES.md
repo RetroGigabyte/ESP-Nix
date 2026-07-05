@@ -1,4 +1,4 @@
-# ESP-Nix v1.0.2
+# ESP-Nix v1.1
 
 A declarative, Unix-like shell operating system for the ESP32 — built from scratch on FreeRTOS, running entirely off an I2C LCD and a serial console (with optional SD card, PS/2 keyboard, and WiFi).
 
@@ -69,6 +69,12 @@ The `nixfetch` snapshot on `web`'s file manager page rendered as an empty `<pre>
 ## Bug Fix (v0.9.1.1): backup -m failed on the filesystem root
 
 `backup -m` compresses internal storage root (`/`) directly, but `Archiver::compressZip()` computes a wrapping directory name from the last path segment - for `/` itself, that's an empty string, producing an invalid zip entry name (`/`) that miniz rejects with "Failed to add directory entry: /". Fixed by special-casing root: instead of wrapping everything in a (nonexistent) top-level folder, `/`'s direct children are added to the zip individually, with no wrapping folder at all - which is also the more useful behavior for a backup, since restoring extracts straight back onto `/` without an extra nested layer.
+
+## New in v1.1: `runmod` - stage 2 of the ELF loader, real relocations and symbol resolution
+
+`runmod <path.o> <function> [a] [b]` is the next real step past `runelf`: it loads a genuine `.o` relocatable object file (not a bare `objcopy`'d `.text` dump), parses its `.rela.text`/`.symtab`/`.strtab`, resolves undefined external symbols against a small firmware-exported whitelist (`kRunmodSymbols` in `commands.h` - currently just `host_print(int)`, a test function that prints via Serial), patches the resolved addresses into the relocations Xtensa's `-mlongcalls` produces (`R_XTENSA_32` against the literal-pool entry the `L32R`+`callx8` call sequence loads from), and calls a named function within the module by symbol name.
+
+This is genuinely new capability, not just a bigger `runelf`: loaded code can now call back into the firmware. The implementation lives in the new `src/elfloader.h` (`ElfModule` class) - a minimal ELF32 parser, not a general one: no program headers, no multi-file linking, and only `R_XTENSA_32` relocations against undefined symbols are handled (the other relocation types `-mlongcalls` emits, `R_XTENSA_SLOT0_OP`/`R_XTENSA_ASM_EXPAND`, are linker-relaxation metadata that only matters if the linker were relaxing longcalls, which never happens here). Growing the exported symbol table (more firmware functions loaded modules can call) is now just adding entries to `kRunmodSymbols` - the real remaining work toward something like a dynamically-loadable HTTPS stack is exposing enough of the firmware's own functions this way, plus handling relocations against *defined* (not just undefined) symbols for modules with more than one internal reference.
 
 ## New in v1.0.2: `runelf` supports zero-argument functions - makes `.elf`s at boot actually useful
 

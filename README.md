@@ -94,7 +94,7 @@ After booting, you'll see the shell prompt:
 
 ```
 root@esp-nix:/$ help
-ESP-Nix 1.0.2 - Available commands:
+ESP-Nix 1.1 - Available commands:
   help        - Show this help
   ls [-l] [path] - List directory (-l for permissions/size/date)
   pwd         - Print working directory
@@ -149,6 +149,7 @@ ESP-Nix 1.0.2 - Available commands:
   rmali <name> - Remove an alias created by mkali
   ls-ali - List aliases (what each runs, and whether it's set to run at boot)
   runelf <path> [a] [b] - Run a self-contained compiled Xtensa function (stage 1, see README)
+  runmod <path.o> <fn> [a] [b] - Run a .o with real relocations/symbol resolution (stage 2, see README)
   retron <file.retro> - Run a Retron language script (variables/loops/if)
   sleep <seconds> - Pause (any key interrupts)
   hostname [-v] | hostname -s <name> - Show/set hostname (prompt + WiFi)
@@ -161,7 +162,7 @@ ESP-Nix 1.0.2 - Available commands:
 
 ```bash
 root@esp-nix:/$ uname
-ESP-Nix 1.0.2
+ESP-Nix 1.1
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -202,7 +203,7 @@ A declarative OS for ESP32.
 root@esp-nix:/$ uname > sysinfo.txt
 root@esp-nix:/$ echo "more info" >> sysinfo.txt
 root@esp-nix:/$ cat sysinfo.txt
-ESP-Nix 1.0.2
+ESP-Nix 1.1
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -444,7 +445,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 root@esp-nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 1.0.2
+  |:_/ |         OS: ESP-Nix 1.1
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -729,7 +730,27 @@ xtensa-esp32-elf-gcc -c -O1 -mtext-section-literals -mlongcalls -o prog.o prog.c
 xtensa-esp32-elf-objcopy -O binary --only-section=.text prog.o add_and_square.elf
 ```
 
-This only works because a self-contained function (only local variables, no external calls, no global data) compiles down with zero relocations against its own `.text` — copying the section verbatim and calling it directly is safe. Anything that calls another function or touches a global will need the real relocator/symbol-table work planned for the ELF loader.
+This only works because a self-contained function (only local variables, no external calls, no global data) compiles down with zero relocations against its own `.text` — copying the section verbatim and calling it directly is safe. Anything that calls another function or touches a global needs `runmod` instead.
+
+### runmod
+
+Stage 2 of the ELF loader — the real next step past `runelf`. It loads a genuine `.o` relocatable object file (not a bare `.text` dump), resolves calls to a small whitelist of firmware-exported functions, and calls a named function inside it:
+
+```bash
+root@esp-nix:/$ runmod /sd/callext.o run_with_callback 3 4
+[runmod host_print] 7
+Result: 7
+```
+
+`runmod <path.o> <function> [a] [b]` — same `int(int,int)`/`int()` signature convention as `runelf`. The difference is what happens during loading: it parses the object file's `.rela.text`, `.symtab`, and `.strtab`, and for every `R_XTENSA_32` relocation against an *undefined* symbol (the literal-pool entry Xtensa's `-mlongcalls` generates for an external call), it looks the symbol's name up in a small firmware-side whitelist (`kRunmodSymbols` in `src/commands.h` — currently just `host_print(int)`, which prints via Serial) and patches in the resolved address before copying the section into executable RAM. Calling a function that isn't in that whitelist fails with a clear "unresolved symbol" error rather than crashing.
+
+Implementation lives in `src/elfloader.h` (`ElfModule`) — a minimal ELF32 parser, not a general one: no program headers, no multi-file linking, and only relocations against *undefined* symbols are handled (a reference to something else defined in the same object file is skipped rather than guessed at, since only `.text` is loaded). Growing what loaded code can do is now mostly a matter of adding more entries to `kRunmodSymbols` and handling relocations against symbols defined within the module itself.
+
+Building a compatible `.o` is simpler than `runelf`'s recipe — just stop after the compile step, no `objcopy` needed:
+
+```bash
+xtensa-esp32-elf-gcc -c -O1 -mtext-section-literals -mlongcalls -o callext.o callext.c
+```
 
 ### Partition Layout
 
