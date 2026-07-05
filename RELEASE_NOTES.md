@@ -1,4 +1,4 @@
-# ESP-Nix v1.1
+# ESP-Nix v1.1.1
 
 A declarative, Unix-like shell operating system for the ESP32 — built from scratch on FreeRTOS, running entirely off an I2C LCD and a serial console (with optional SD card, PS/2 keyboard, and WiFi).
 
@@ -69,6 +69,14 @@ The `nixfetch` snapshot on `web`'s file manager page rendered as an empty `<pre>
 ## Bug Fix (v0.9.1.1): backup -m failed on the filesystem root
 
 `backup -m` compresses internal storage root (`/`) directly, but `Archiver::compressZip()` computes a wrapping directory name from the last path segment - for `/` itself, that's an empty string, producing an invalid zip entry name (`/`) that miniz rejects with "Failed to add directory entry: /". Fixed by special-casing root: instead of wrapping everything in a (nonexistent) top-level folder, `/`'s direct children are added to the zip individually, with no wrapping folder at all - which is also the more useful behavior for a backup, since restoring extracts straight back onto `/` without an extra nested layer.
+
+## New in v1.1.1: `runmod` now handles address-taken symbols (e.g. function pointers)
+
+The one real gap called out after confirming multi-function modules - a locally-defined symbol referenced *by address* rather than called directly (the pattern behind function pointers, callback tables, anything a real library like an HTTPS stack leans on heavily) - is now handled. gas emits this as an `R_XTENSA_32` relocation against the enclosing `SECTION` symbol (not the specific function symbol) with the real intra-section offset baked into the placeholder bytes already sitting at the relocation site, in addition to (not instead of) the relocation's own addend field - confirmed by reading the raw relocation bytes directly, since this isn't obvious from `readelf`'s summary output alone. `runmod` now combines both when resolving a same-module relocation. Verified on real hardware: a function that takes the address of a second internal function and returns it as a plain integer returned exactly `module_base + 8` (the second function's real offset) - not a coincidence, confirmed by comparing against the module's actual load address.
+
+## Confirmed on hardware: `runmod` already handles multi-function modules
+
+Tested whether a module with more than one internal function (one calling another, both defined in the same `.o`) needs new relocation handling in `runmod` beyond what already exists - it doesn't. A same-file function call compiles to a direct `call8`/PC-relative windowed call, fully resolved by the assembler at compile time with no relocation entry needed at all (only `-mlongcalls`'s indirect `L32R`+`callx8` sequence for genuinely *external* symbols produces the `R_XTENSA_32` relocation `runmod` already patches). Verified with `elf_examples/multifn.c` (`sum_of_squares()` calling a separate `square()` twice, then reporting the result via the existing `host_print` symbol): `runmod multifn.o sum_of_squares 3 4` correctly printed `25` (3²+4²) on real hardware. The actual remaining gap for nontrivial modules is symbols that are locally-defined but referenced *by address* (e.g. function pointers, struct/array data) rather than called directly - those still produce `R_XTENSA_32` relocations against a defined symbol, which `runmod` still skips today.
 
 ## New in v1.1: `runmod` - stage 2 of the ELF loader, real relocations and symbol resolution
 

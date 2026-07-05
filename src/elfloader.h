@@ -121,6 +121,10 @@ public:
     return functions.count(name) > 0;
   }
 
+  void* baseAddress() {
+    return execMem;
+  }
+
 private:
   FileSystem& fs;
   Terminal& term;
@@ -197,6 +201,18 @@ private:
     }
     memcpy(staging, data + textSh.sh_offset, textLen);
 
+    // Allocated before relocations are applied (not after, as in an
+    // earlier version of this loader) because a relocation against a
+    // symbol defined within this same module - e.g. its address taken
+    // for a function pointer, rather than called directly - needs to
+    // know execMem's final address to compute execMem + st_value.
+    execMem = heap_caps_malloc(wordLen, MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
+    if (!execMem) {
+      term.println("runmod: could not allocate " + String(wordLen) + " bytes of executable RAM");
+      free(staging);
+      return false;
+    }
+
     const Elf32_Sym* syms = nullptr;
     const char* strtab = nullptr;
     if (symtabIdx >= 0 && strtabIdx >= 0) {
@@ -214,33 +230,53 @@ private:
         if (ELF_R_TYPE(rel.r_info) != R_XTENSA_32) continue;
 
         const Elf32_Sym& sym = syms[ELF_R_SYM(rel.r_info)];
-        if (sym.st_shndx != SHN_UNDEF) {
-          // Defined within this same object file (e.g. a self-reference
-          // to .text) - not supported yet, since only one section is
-          // loaded; skip rather than guess at a wrong address.
-          continue;
-        }
+        uint32_t resolved;
 
-        const char* symName = strtab + sym.st_name;
-        void* addr = lookupSymbol(symName, symtab);
-        if (!addr) {
-          term.println("runmod: unresolved symbol: " + String(symName));
+        if (sym.st_shndx == SHN_UNDEF) {
+          const char* symName = strtab + sym.st_name;
+          void* addr = lookupSymbol(symName, symtab);
+          if (!addr) {
+            term.println("runmod: unresolved symbol: " + String(symName));
+            free(staging);
+            heap_caps_free(execMem);
+            execMem = nullptr;
+            return false;
+          }
+          resolved = (uint32_t)addr;
+        } else if (sym.st_shndx == textIdx) {
+          // A symbol defined within the same .text we're loading (e.g. a
+          // function's address taken for a function pointer) - resolves
+          // relative to where we're placing this module in memory.
+          resolved = (uint32_t)execMem + sym.st_value;
+        } else {
+          // Defined in some other section we don't load (.data/.rodata/
+          // etc.) - not supported yet, since only .text is loaded.
+          term.println("runmod: unsupported relocation against a symbol outside .text");
           free(staging);
+          heap_caps_free(execMem);
+          execMem = nullptr;
           return false;
         }
 
-        uint32_t value = (uint32_t)addr + rel.r_addend;
+        // For a relocation against a local/static symbol, gas emits it
+        // targeting the enclosing SECTION symbol (whose st_value is
+        // always 0) rather than the specific function symbol, and -
+        // empirically verified against this toolchain's actual output,
+        // not just the ELF spec on paper - the real intra-section offset
+        // ends up baked into the placeholder bytes already sitting at
+        // the relocation site, in addition to (not instead of) r_addend.
+        // Reading that placeholder back before overwriting it makes the
+        // combined formula correct for both a plain addend-only reloc
+        // (placeholder is 0) and this section-symbol form (r_addend is 0).
+        uint32_t placeholder = 0;
+        if (rel.r_offset + 4 <= wordLen) {
+          memcpy(&placeholder, staging + rel.r_offset, 4);
+        }
+        uint32_t value = resolved + rel.r_addend + placeholder;
         if (rel.r_offset + 4 <= wordLen) {
           memcpy(staging + rel.r_offset, &value, 4);
         }
       }
-    }
-
-    execMem = heap_caps_malloc(wordLen, MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
-    if (!execMem) {
-      term.println("runmod: could not allocate " + String(wordLen) + " bytes of executable RAM");
-      free(staging);
-      return false;
     }
     const uint32_t* src = (const uint32_t*)staging;
     uint32_t* dst = (uint32_t*)execMem;
