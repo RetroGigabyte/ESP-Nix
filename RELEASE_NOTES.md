@@ -1,4 +1,4 @@
-# ESP-Nix v1.1.1
+# ESP-Nix v1.2
 
 A declarative, Unix-like shell operating system for the ESP32 — built from scratch on FreeRTOS, running entirely off an I2C LCD and a serial console (with optional SD card, PS/2 keyboard, and WiFi).
 
@@ -69,6 +69,19 @@ The `nixfetch` snapshot on `web`'s file manager page rendered as an empty `<pre>
 ## Bug Fix (v0.9.1.1): backup -m failed on the filesystem root
 
 `backup -m` compresses internal storage root (`/`) directly, but `Archiver::compressZip()` computes a wrapping directory name from the last path segment - for `/` itself, that's an empty string, producing an invalid zip entry name (`/`) that miniz rejects with "Failed to add directory entry: /". Fixed by special-casing root: instead of wrapping everything in a (nonexistent) top-level folder, `/`'s direct children are added to the zip individually, with no wrapping folder at all - which is also the more useful behavior for a backup, since restoring extracts straight back onto `/` without an extra nested layer.
+
+## New in v1.2: `runmod` stage 3 - global data, memory management, and multi-file linking
+
+A major expansion of `runmod`, closing out every gap identified after stage 2: `.rodata`/`.data`/`.bss` (not just `.text`), `malloc`/`free`/`memcpy`/string functions exported for loaded code to use, a generalized up-to-6-argument calling convention (replacing the old fixed `int(int,int)`/`int()` pair), and linking multiple `.o` files together. All six verified independently on real hardware, not just compiled:
+
+- **`.rodata`** (string literals, lookup tables) - gas commonly names this section `.rodata.str1.4` rather than plain `.rodata`, matched by prefix. Verified: a function indexing into a string literal by a runtime parameter (not foldable at compile time) returned the correct byte.
+- **`.data`** (initialized mutable globals) - verified: a global initialized to 10, incremented by a runtime argument, returned the correct sum.
+- **`.bss`** (zero-initialized globals) - verified: reading a never-before-written global returned 0, as it should.
+- **`malloc`/`free`** (plus `calloc`/`realloc`/`memcpy`/`memset`/`memmove`/`memcmp`/`strlen`/`strcpy`/`strncpy`/`strcmp`/`strncmp`/`strcat`/`strchr`) - verified: a function that `malloc`'s a buffer, writes and reads through it, then `free`s it, produced the correct value.
+- **Multi-file linking** - `runmod <file1.o> <file2.o> ... <function> [args]` loads every file's sections first (so every final address is known), builds one combined table of each file's externally-visible symbols, then resolves each file's relocations against that combined table before falling back to the firmware whitelist. Verified: two independently compiled `.o` files, one calling a function defined in the other, produced the correct result through a genuine cross-file call.
+- **Generalized calling convention** - `runmod` now takes any function name plus up to 6 decimal or `0x`-hex arguments, rather than the old fixed two-int/zero-int split. Works because Xtensa's windowed ABI passes the first 6 register-sized arguments the same way regardless of the callee's real declared signature.
+
+This is a full rewrite of `src/elfloader.h`'s `ElfModule` to a proper (if still minimal) two-pass loader/linker: allocate every section of every file, collect a combined symbol table, then relocate. Toward the original goal (something like the HTTPS/TLS stack loading dynamically), the remaining real gaps are: many more exported symbols (socket calls, ESP32 hardware crypto-acceleration hooks), and a real multi-file build/packaging step instead of hand-listing `.o` files on the command line.
 
 ## New in v1.1.1: `runmod` now handles address-taken symbols (e.g. function pointers)
 

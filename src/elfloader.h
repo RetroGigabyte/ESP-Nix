@@ -2,24 +2,36 @@
 
 #include <Arduino.h>
 #include <map>
+#include <vector>
 #include "filesystem.h"
 #include "terminal.h"
 #include "esp_heap_caps.h"
 
-// Minimal ELF32 (little-endian) relocatable-object loader for Xtensa -
-// stage 2 of ESP-Nix's "run compiled code from SD" work (see runelf in
-// commands.h for stage 1). Loads a genuine .o file (not a bare objcopy'd
-// .text dump), applies R_XTENSA_32 relocations against undefined symbols
-// by resolving them against a small firmware-exported whitelist, and
-// calls a named function within it.
+// Minimal ELF32 (little-endian) relocatable-object loader/linker for
+// Xtensa - stage 3 of ESP-Nix's "run compiled code from SD" work.
 //
-// Deliberately NOT a general ELF/dynamic loader: no program headers, no
-// multi-file linking, only .text/.rela.text/.symtab/.strtab are read,
-// and only R_XTENSA_32 relocations against undefined external symbols
-// are handled (the other relocation types Xtensa -mlongcalls produces -
-// R_XTENSA_SLOT0_OP, R_XTENSA_ASM_EXPAND - are linker-relaxation
-// metadata that only matters if the linker were relaxing longcalls,
-// which we never do here, so they're safely ignored).
+// Handles, per loaded set of .o files:
+//   - .text, .rodata, .data, .bss (not just .text as in the first
+//     version) - so string literals, lookup tables, and global
+//     variables work, not just pure-arithmetic functions.
+//   - Calls into the firmware via a symbol whitelist (kRunmodSymbols in
+//     commands.h).
+//   - Calls and address-taken references between functions/data in the
+//     SAME file (resolved via that file's own section base addresses).
+//   - Calls and references between MULTIPLE loaded files (a simple
+//     two-pass link: allocate every file's sections first, so every
+//     final address is known, then build one combined table of every
+//     file's externally-visible symbols, then apply every file's
+//     relocations against that combined table, falling back to the
+//     firmware whitelist for anything still undefined).
+//
+// Deliberately NOT a general linker: no program headers, only
+// R_XTENSA_32 relocations are handled (the other types -mlongcalls
+// emits are linker-relaxation metadata, irrelevant since we never
+// relax), and there's no support for COMDAT/weak-symbol resolution,
+// versioned symbols, or anything ELF supports beyond what a handful of
+// plain C translation units compiled with -mtext-section-literals
+// -mlongcalls actually produce.
 
 struct Elf32_Ehdr {
   uint8_t  e_ident[16];
@@ -77,220 +89,371 @@ struct ExportedSymbol {
   void* addr;
 };
 
+// One loaded object file: its raw bytes (kept only until this file's
+// relocations are applied, then freed), section headers, and the
+// separately-allocated final memory for each of .text/.rodata/.data/.bss.
+struct LoadedObject {
+  uint8_t* raw = nullptr;
+  const Elf32_Ehdr* eh = nullptr;
+  const Elf32_Shdr* shdrs = nullptr;
+  const char* shstrtab = nullptr;
+  int shnum = 0;
+
+  int textIdx = -1, rodataIdx = -1, dataIdx = -1, bssIdx = -1;
+  int relaTextIdx = -1, relaRodataIdx = -1, relaDataIdx = -1;
+  int symtabIdx = -1, strtabIdx = -1;
+
+  void* textMem = nullptr;
+  void* rodataMem = nullptr;
+  void* dataMem = nullptr;
+  void* bssMem = nullptr;
+  size_t textSize = 0, rodataSize = 0, dataSize = 0, bssSize = 0;
+
+  // Every FUNC symbol defined in this file's .text, regardless of
+  // binding (local/static functions are still callable by name within
+  // this same file - just not exposed to other files being linked
+  // alongside it).
+  std::map<String, uint32_t> localFunctions;
+};
+
 class ElfModule {
 public:
   ElfModule(FileSystem& f, Terminal& t) : fs(f), term(t) {}
 
   ~ElfModule() {
-    if (execMem) heap_caps_free(execMem);
+    for (auto& obj : objects) {
+      if (obj.textMem) heap_caps_free(obj.textMem);
+      if (obj.rodataMem) free(obj.rodataMem);
+      if (obj.dataMem) free(obj.dataMem);
+      if (obj.bssMem) free(obj.bssMem);
+      if (obj.raw) free(obj.raw);
+    }
   }
 
-  // Loads path, resolving undefined symbols against symtab (an array
-  // terminated by a {nullptr, nullptr} entry). Prints a clear error and
-  // returns false on any failure.
-  bool load(const String& path, const ExportedSymbol* symtab) {
-    uint8_t* data = nullptr;
-    size_t dataLen = 0;
-    if (!readWholeFile(path, data, dataLen)) {
-      term.println("runmod: could not read " + path);
-      return false;
+  // Loads and links one or more object files together. Undefined
+  // symbols are resolved first against the other files in this same
+  // set, then against the firmware whitelist. Prints a specific error
+  // and returns false on any failure.
+  bool load(const std::vector<String>& paths, const ExportedSymbol* symtab) {
+    objects.resize(paths.size());
+
+    for (size_t i = 0; i < paths.size(); i++) {
+      if (!readAndParse(paths[i], objects[i])) return false;
     }
 
-    bool ok = parseAndLoad(data, dataLen, symtab);
-    free(data);
-    return ok;
-  }
+    // Allocate memory for every section of every file first, so every
+    // final address is known before any relocation - needed for both
+    // same-file and cross-file references.
+    for (auto& obj : objects) {
+      if (!allocateSections(obj)) return false;
+    }
 
-  bool callInt2(const String& name, int a, int b, int& outResult) {
-    if (!functions.count(name)) return false;
-    typedef int (*Fn)(int, int);
-    Fn fn = (Fn)((uint8_t*)execMem + functions[name]);
-    outResult = fn(a, b);
+    // One combined table of every file's externally-visible symbols,
+    // for resolving undefined references against each other before
+    // falling back to the firmware whitelist.
+    std::map<String, uint32_t> globalSymbols;
+    for (auto& obj : objects) {
+      collectSymbols(obj, globalSymbols);
+    }
+
+    for (auto& obj : objects) {
+      if (!applyRelocations(obj, globalSymbols, symtab)) return false;
+    }
+
+    // Raw file bytes are no longer needed once everything's relocated
+    // and copied into its final memory.
+    for (auto& obj : objects) {
+      free(obj.raw);
+      obj.raw = nullptr;
+    }
+
     return true;
   }
 
-  bool callInt0(const String& name, int& outResult) {
-    if (!functions.count(name)) return false;
-    typedef int (*Fn)();
-    Fn fn = (Fn)((uint8_t*)execMem + functions[name]);
-    outResult = fn();
+  // Calls a loaded function by name with up to 6 register-sized (32-bit
+  // int or pointer) arguments - the practical ceiling for a shell
+  // command to express, since Xtensa's windowed ABI passes the first 6
+  // scalar/pointer args in registers regardless of the callee's real
+  // signature; a callee that takes fewer simply ignores the rest.
+  bool call(const String& name, const std::vector<uint32_t>& args, uint32_t& outResult) {
+    void* fn = findFunction(name);
+    if (!fn) return false;
+
+    uint32_t a[6] = {0, 0, 0, 0, 0, 0};
+    for (size_t i = 0; i < args.size() && i < 6; i++) a[i] = args[i];
+
+    typedef uint32_t (*Fn6)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+    Fn6 f = (Fn6)fn;
+    outResult = f(a[0], a[1], a[2], a[3], a[4], a[5]);
     return true;
   }
 
   bool hasFunction(const String& name) {
-    return functions.count(name) > 0;
-  }
-
-  void* baseAddress() {
-    return execMem;
+    return findFunction(name) != nullptr;
   }
 
 private:
   FileSystem& fs;
   Terminal& term;
-  void* execMem = nullptr;
-  std::map<String, uint32_t> functions;
+  std::vector<LoadedObject> objects;
 
-  bool readWholeFile(const String& path, uint8_t*& outData, size_t& outLen) {
-    File f = fs.openRaw(path, "r");
-    if (!f) return false;
+  void* findFunction(const String& name) {
+    for (auto& obj : objects) {
+      auto it = obj.localFunctions.find(name);
+      if (it != obj.localFunctions.end()) {
+        return (uint8_t*)obj.textMem + it->second;
+      }
+    }
+    return nullptr;
+  }
+
+  bool readAndParse(const String& path, LoadedObject& obj) {
+    String resolved = fs.resolvePath(path);
+    if (!fs.exists(resolved)) {
+      term.println("runmod: no such file: " + resolved);
+      return false;
+    }
+    File f = fs.openRaw(resolved, "r");
+    if (!f) {
+      term.println("runmod: could not open " + resolved);
+      return false;
+    }
     size_t len = f.size();
     if (len == 0) {
+      term.println("runmod: empty file: " + resolved);
       f.close();
       return false;
     }
     uint8_t* buf = (uint8_t*)malloc(len);
     if (!buf) {
+      term.println("runmod: could not allocate buffer for " + resolved);
       f.close();
       return false;
     }
     f.read(buf, len);
     f.close();
-    outData = buf;
-    outLen = len;
+
+    if (len < sizeof(Elf32_Ehdr)) {
+      term.println("runmod: " + resolved + " is too small to be an ELF object");
+      free(buf);
+      return false;
+    }
+    const Elf32_Ehdr* eh = (const Elf32_Ehdr*)buf;
+    if (eh->e_ident[0] != 0x7f || eh->e_ident[1] != 'E' || eh->e_ident[2] != 'L' || eh->e_ident[3] != 'F') {
+      term.println("runmod: " + resolved + " is not an ELF file");
+      free(buf);
+      return false;
+    }
+
+    obj.raw = buf;
+    obj.eh = eh;
+    obj.shdrs = (const Elf32_Shdr*)(buf + eh->e_shoff);
+    obj.shnum = eh->e_shnum;
+    obj.shstrtab = (const char*)(buf + obj.shdrs[eh->e_shstrndx].sh_offset);
+
+    // .rodata specifically is matched by prefix, not exact name: gas
+    // commonly emits string literals into a mergeable-strings subsection
+    // like ".rodata.str1.4" rather than plain ".rodata" - confirmed by
+    // compiling an actual string-literal test case, not assumed from
+    // the ELF spec alone. Only the first matching section is tracked;
+    // a file with more than one distinct rodata-like section isn't
+    // supported (a limitation worth hitting a real error on rather than
+    // silently mis-loading, if it ever comes up).
+    for (int i = 0; i < obj.shnum; i++) {
+      const char* name = obj.shstrtab + obj.shdrs[i].sh_name;
+      if (strcmp(name, ".text") == 0) obj.textIdx = i;
+      else if (obj.rodataIdx < 0 && strncmp(name, ".rodata", 7) == 0) obj.rodataIdx = i;
+      else if (strcmp(name, ".data") == 0) obj.dataIdx = i;
+      else if (strcmp(name, ".bss") == 0) obj.bssIdx = i;
+      else if (strcmp(name, ".rela.text") == 0) obj.relaTextIdx = i;
+      else if (obj.relaRodataIdx < 0 && strncmp(name, ".rela.rodata", 12) == 0) obj.relaRodataIdx = i;
+      else if (strcmp(name, ".rela.data") == 0) obj.relaDataIdx = i;
+      else if (strcmp(name, ".symtab") == 0) obj.symtabIdx = i;
+      else if (strcmp(name, ".strtab") == 0) obj.strtabIdx = i;
+    }
+
+    if (obj.textIdx < 0) {
+      term.println("runmod: " + resolved + " has no .text section");
+      free(buf);
+      return false;
+    }
+
     return true;
   }
 
-  void* lookupSymbol(const char* name, const ExportedSymbol* symtab) {
-    for (int i = 0; symtab[i].name != nullptr; i++) {
-      if (strcmp(symtab[i].name, name) == 0) return symtab[i].addr;
-    }
-    return nullptr;
+  size_t wordAlign(size_t n) {
+    return (n + 3) & ~((size_t)3);
   }
 
-  bool parseAndLoad(const uint8_t* data, size_t dataLen, const ExportedSymbol* symtab) {
-    if (dataLen < sizeof(Elf32_Ehdr)) {
-      term.println("runmod: file too small to be an ELF object");
-      return false;
-    }
-    const Elf32_Ehdr* eh = (const Elf32_Ehdr*)data;
-    if (eh->e_ident[0] != 0x7f || eh->e_ident[1] != 'E' || eh->e_ident[2] != 'L' || eh->e_ident[3] != 'F') {
-      term.println("runmod: not an ELF file");
-      return false;
-    }
-
-    const Elf32_Shdr* shdrs = (const Elf32_Shdr*)(data + eh->e_shoff);
-    int shnum = eh->e_shnum;
-    const char* shstrtab = (const char*)(data + shdrs[eh->e_shstrndx].sh_offset);
-
-    int textIdx = -1, relaTextIdx = -1, symtabIdx = -1, strtabIdx = -1;
-    for (int i = 0; i < shnum; i++) {
-      const char* name = shstrtab + shdrs[i].sh_name;
-      if (strcmp(name, ".text") == 0) textIdx = i;
-      else if (strcmp(name, ".rela.text") == 0) relaTextIdx = i;
-      else if (strcmp(name, ".symtab") == 0) symtabIdx = i;
-      else if (strcmp(name, ".strtab") == 0) strtabIdx = i;
-    }
-
-    if (textIdx < 0) {
-      term.println("runmod: no .text section found");
-      return false;
-    }
-
-    const Elf32_Shdr& textSh = shdrs[textIdx];
-    size_t textLen = textSh.sh_size;
-    size_t wordLen = (textLen + 3) & ~((size_t)3);
-
-    // Staging buffer: normal byte-addressable RAM, where relocations get
-    // patched in before the final word-copy into executable memory
-    // (IRAM only supports 32-bit-aligned accesses on the ESP32).
-    uint8_t* staging = (uint8_t*)calloc(1, wordLen);
-    if (!staging) {
-      term.println("runmod: could not allocate staging buffer");
-      return false;
-    }
-    memcpy(staging, data + textSh.sh_offset, textLen);
-
-    // Allocated before relocations are applied (not after, as in an
-    // earlier version of this loader) because a relocation against a
-    // symbol defined within this same module - e.g. its address taken
-    // for a function pointer, rather than called directly - needs to
-    // know execMem's final address to compute execMem + st_value.
-    execMem = heap_caps_malloc(wordLen, MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
-    if (!execMem) {
-      term.println("runmod: could not allocate " + String(wordLen) + " bytes of executable RAM");
-      free(staging);
-      return false;
-    }
-
-    const Elf32_Sym* syms = nullptr;
-    const char* strtab = nullptr;
-    if (symtabIdx >= 0 && strtabIdx >= 0) {
-      syms = (const Elf32_Sym*)(data + shdrs[symtabIdx].sh_offset);
-      strtab = (const char*)(data + shdrs[strtabIdx].sh_offset);
-    }
-
-    if (relaTextIdx >= 0 && syms && strtab) {
-      const Elf32_Shdr& relaSh = shdrs[relaTextIdx];
-      const Elf32_Rela* relas = (const Elf32_Rela*)(data + relaSh.sh_offset);
-      int relaCount = relaSh.sh_size / sizeof(Elf32_Rela);
-
-      for (int i = 0; i < relaCount; i++) {
-        const Elf32_Rela& rel = relas[i];
-        if (ELF_R_TYPE(rel.r_info) != R_XTENSA_32) continue;
-
-        const Elf32_Sym& sym = syms[ELF_R_SYM(rel.r_info)];
-        uint32_t resolved;
-
-        if (sym.st_shndx == SHN_UNDEF) {
-          const char* symName = strtab + sym.st_name;
-          void* addr = lookupSymbol(symName, symtab);
-          if (!addr) {
-            term.println("runmod: unresolved symbol: " + String(symName));
-            free(staging);
-            heap_caps_free(execMem);
-            execMem = nullptr;
-            return false;
-          }
-          resolved = (uint32_t)addr;
-        } else if (sym.st_shndx == textIdx) {
-          // A symbol defined within the same .text we're loading (e.g. a
-          // function's address taken for a function pointer) - resolves
-          // relative to where we're placing this module in memory.
-          resolved = (uint32_t)execMem + sym.st_value;
-        } else {
-          // Defined in some other section we don't load (.data/.rodata/
-          // etc.) - not supported yet, since only .text is loaded.
-          term.println("runmod: unsupported relocation against a symbol outside .text");
-          free(staging);
-          heap_caps_free(execMem);
-          execMem = nullptr;
-          return false;
-        }
-
-        // For a relocation against a local/static symbol, gas emits it
-        // targeting the enclosing SECTION symbol (whose st_value is
-        // always 0) rather than the specific function symbol, and -
-        // empirically verified against this toolchain's actual output,
-        // not just the ELF spec on paper - the real intra-section offset
-        // ends up baked into the placeholder bytes already sitting at
-        // the relocation site, in addition to (not instead of) r_addend.
-        // Reading that placeholder back before overwriting it makes the
-        // combined formula correct for both a plain addend-only reloc
-        // (placeholder is 0) and this section-symbol form (r_addend is 0).
-        uint32_t placeholder = 0;
-        if (rel.r_offset + 4 <= wordLen) {
-          memcpy(&placeholder, staging + rel.r_offset, 4);
-        }
-        uint32_t value = resolved + rel.r_addend + placeholder;
-        if (rel.r_offset + 4 <= wordLen) {
-          memcpy(staging + rel.r_offset, &value, 4);
-        }
+  bool allocateSections(LoadedObject& obj) {
+    obj.textSize = wordAlign(obj.shdrs[obj.textIdx].sh_size);
+    if (obj.textSize > 0) {
+      obj.textMem = heap_caps_malloc(obj.textSize, MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
+      if (!obj.textMem) {
+        term.println("runmod: could not allocate executable RAM for .text");
+        return false;
       }
     }
-    const uint32_t* src = (const uint32_t*)staging;
-    uint32_t* dst = (uint32_t*)execMem;
-    for (size_t i = 0; i < wordLen / 4; i++) dst[i] = src[i];
-    free(staging);
 
-    if (syms && strtab) {
-      int symCount = shdrs[symtabIdx].sh_size / sizeof(Elf32_Sym);
-      for (int i = 0; i < symCount; i++) {
-        const Elf32_Sym& sym = syms[i];
-        if ((sym.st_info & 0xf) == STT_FUNC && sym.st_shndx == textIdx) {
-          functions[String(strtab + sym.st_name)] = sym.st_value;
+    if (obj.rodataIdx >= 0 && obj.shdrs[obj.rodataIdx].sh_size > 0) {
+      obj.rodataSize = wordAlign(obj.shdrs[obj.rodataIdx].sh_size);
+      obj.rodataMem = calloc(1, obj.rodataSize);
+      if (!obj.rodataMem) {
+        term.println("runmod: could not allocate RAM for .rodata");
+        return false;
+      }
+      memcpy(obj.rodataMem, obj.raw + obj.shdrs[obj.rodataIdx].sh_offset, obj.shdrs[obj.rodataIdx].sh_size);
+    }
+
+    if (obj.dataIdx >= 0 && obj.shdrs[obj.dataIdx].sh_size > 0) {
+      obj.dataSize = wordAlign(obj.shdrs[obj.dataIdx].sh_size);
+      obj.dataMem = calloc(1, obj.dataSize);
+      if (!obj.dataMem) {
+        term.println("runmod: could not allocate RAM for .data");
+        return false;
+      }
+      memcpy(obj.dataMem, obj.raw + obj.shdrs[obj.dataIdx].sh_offset, obj.shdrs[obj.dataIdx].sh_size);
+    }
+
+    if (obj.bssIdx >= 0 && obj.shdrs[obj.bssIdx].sh_size > 0) {
+      obj.bssSize = wordAlign(obj.shdrs[obj.bssIdx].sh_size);
+      obj.bssMem = calloc(1, obj.bssSize);  // .bss has no file content - just zeroed memory
+      if (!obj.bssMem) {
+        term.println("runmod: could not allocate RAM for .bss");
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  void collectSymbols(LoadedObject& obj, std::map<String, uint32_t>& globalSymbols) {
+    if (obj.symtabIdx < 0 || obj.strtabIdx < 0) return;
+    const Elf32_Sym* syms = (const Elf32_Sym*)(obj.raw + obj.shdrs[obj.symtabIdx].sh_offset);
+    const char* strtab = (const char*)(obj.raw + obj.shdrs[obj.strtabIdx].sh_offset);
+    int symCount = obj.shdrs[obj.symtabIdx].sh_size / sizeof(Elf32_Sym);
+
+    for (int i = 0; i < symCount; i++) {
+      const Elf32_Sym& sym = syms[i];
+      if (sym.st_shndx == SHN_UNDEF) continue;
+
+      uint32_t addr;
+      if (sym.st_shndx == obj.textIdx) addr = (uint32_t)obj.textMem + sym.st_value;
+      else if (sym.st_shndx == obj.rodataIdx) addr = (uint32_t)obj.rodataMem + sym.st_value;
+      else if (sym.st_shndx == obj.dataIdx) addr = (uint32_t)obj.dataMem + sym.st_value;
+      else if (sym.st_shndx == obj.bssIdx) addr = (uint32_t)obj.bssMem + sym.st_value;
+      else continue;  // some section we don't track (e.g. .comment)
+
+      // Callable/addressable by name within this same file regardless
+      // of binding - a static/local function still needs to be found
+      // when this file's own relocations reference it, and still
+      // needs to be callable directly by name from the shell.
+      if ((sym.st_info & 0xf) == STT_FUNC && sym.st_shndx == obj.textIdx) {
+        obj.localFunctions[String(strtab + sym.st_name)] = sym.st_value;
+      }
+
+      // Only externally-visible (non-local) symbols get exposed for
+      // OTHER files in a multi-file load to link against.
+      int bind = sym.st_info >> 4;
+      if (bind != 0) {
+        globalSymbols[String(strtab + sym.st_name)] = addr;
+      }
+    }
+  }
+
+  bool resolveSymbolAddress(const LoadedObject& obj, const Elf32_Sym& sym, const char* strtab,
+                             const std::map<String, uint32_t>& globalSymbols,
+                             const ExportedSymbol* symtab, uint32_t& outAddr) {
+    if (sym.st_shndx == SHN_UNDEF) {
+      String name = String(strtab + sym.st_name);
+
+      auto it = globalSymbols.find(name);
+      if (it != globalSymbols.end()) {
+        outAddr = it->second;
+        return true;
+      }
+      for (int i = 0; symtab[i].name != nullptr; i++) {
+        if (name == symtab[i].name) {
+          outAddr = (uint32_t)symtab[i].addr;
+          return true;
         }
       }
+      term.println("runmod: unresolved symbol: " + name);
+      return false;
+    }
+
+    if (sym.st_shndx == obj.textIdx)   { outAddr = (uint32_t)obj.textMem + sym.st_value;   return true; }
+    if (sym.st_shndx == obj.rodataIdx) { outAddr = (uint32_t)obj.rodataMem + sym.st_value; return true; }
+    if (sym.st_shndx == obj.dataIdx)   { outAddr = (uint32_t)obj.dataMem + sym.st_value;   return true; }
+    if (sym.st_shndx == obj.bssIdx)    { outAddr = (uint32_t)obj.bssMem + sym.st_value;    return true; }
+
+    term.println("runmod: relocation against an unsupported section");
+    return false;
+  }
+
+  // Applies every R_XTENSA_32 relocation in one (section, .rela.<section>)
+  // pair, writing the resolved 32-bit value into destMem (already holding
+  // that section's raw pre-relocation bytes). gas emits relocations
+  // against local/static symbols targeting the enclosing SECTION symbol
+  // (whose st_value is always 0) rather than the specific symbol, with
+  // the real intra-section offset baked into the placeholder bytes
+  // already at the relocation site - confirmed empirically against this
+  // toolchain's actual output, not just the ELF spec on paper - so both
+  // the placeholder and r_addend are added on top of the resolved base.
+  bool applyRelocaSection(LoadedObject& obj, int relaIdx, uint8_t* destMem, size_t destSize,
+                           const std::map<String, uint32_t>& globalSymbols, const ExportedSymbol* symtab) {
+    if (relaIdx < 0 || obj.symtabIdx < 0 || obj.strtabIdx < 0) return true;
+
+    const Elf32_Shdr& relaSh = obj.shdrs[relaIdx];
+    const Elf32_Rela* relas = (const Elf32_Rela*)(obj.raw + relaSh.sh_offset);
+    int relaCount = relaSh.sh_size / sizeof(Elf32_Rela);
+    const Elf32_Sym* syms = (const Elf32_Sym*)(obj.raw + obj.shdrs[obj.symtabIdx].sh_offset);
+    const char* strtab = (const char*)(obj.raw + obj.shdrs[obj.strtabIdx].sh_offset);
+
+    for (int i = 0; i < relaCount; i++) {
+      const Elf32_Rela& rel = relas[i];
+      if (ELF_R_TYPE(rel.r_info) != R_XTENSA_32) continue;
+
+      const Elf32_Sym& sym = syms[ELF_R_SYM(rel.r_info)];
+      uint32_t resolved;
+      if (!resolveSymbolAddress(obj, sym, strtab, globalSymbols, symtab, resolved)) return false;
+
+      uint32_t placeholder = 0;
+      if (rel.r_offset + 4 <= destSize) memcpy(&placeholder, destMem + rel.r_offset, 4);
+
+      uint32_t value = resolved + rel.r_addend + placeholder;
+      if (rel.r_offset + 4 <= destSize) memcpy(destMem + rel.r_offset, &value, 4);
+    }
+    return true;
+  }
+
+  bool applyRelocations(LoadedObject& obj, const std::map<String, uint32_t>& globalSymbols, const ExportedSymbol* symtab) {
+    // .text is relocated in a normal-RAM staging buffer first, then
+    // word-copied into its final executable-RAM home, since IRAM
+    // (MALLOC_CAP_EXEC memory) only supports 32-bit-aligned accesses on
+    // the ESP32 - a byte-wise write into it faults with a LoadStoreError.
+    uint8_t* textStaging = (uint8_t*)calloc(1, obj.textSize);
+    if (!textStaging) {
+      term.println("runmod: could not allocate staging buffer for .text");
+      return false;
+    }
+    memcpy(textStaging, obj.raw + obj.shdrs[obj.textIdx].sh_offset, obj.shdrs[obj.textIdx].sh_size);
+
+    if (!applyRelocaSection(obj, obj.relaTextIdx, textStaging, obj.textSize, globalSymbols, symtab)) {
+      free(textStaging);
+      return false;
+    }
+
+    const uint32_t* src = (const uint32_t*)textStaging;
+    uint32_t* dst = (uint32_t*)obj.textMem;
+    for (size_t i = 0; i < obj.textSize / 4; i++) dst[i] = src[i];
+    free(textStaging);
+
+    if (obj.rodataMem && !applyRelocaSection(obj, obj.relaRodataIdx, (uint8_t*)obj.rodataMem, obj.rodataSize, globalSymbols, symtab)) {
+      return false;
+    }
+    if (obj.dataMem && !applyRelocaSection(obj, obj.relaDataIdx, (uint8_t*)obj.dataMem, obj.dataSize, globalSymbols, symtab)) {
+      return false;
     }
 
     return true;

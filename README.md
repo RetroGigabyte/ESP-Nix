@@ -94,7 +94,7 @@ After booting, you'll see the shell prompt:
 
 ```
 root@esp-nix:/$ help
-ESP-Nix 1.1.1 - Available commands:
+ESP-Nix 1.2 - Available commands:
   help        - Show this help
   ls [-l] [path] - List directory (-l for permissions/size/date)
   pwd         - Print working directory
@@ -149,7 +149,7 @@ ESP-Nix 1.1.1 - Available commands:
   rmali <name> - Remove an alias created by mkali
   ls-ali - List aliases (what each runs, and whether it's set to run at boot)
   runelf <path> [a] [b] - Run a self-contained compiled Xtensa function (stage 1, see README)
-  runmod <path.o> <fn> [a] [b] - Run a .o with real relocations/symbol resolution (stage 2, see README)
+  runmod <file.o> [file2.o ...] [--] <fn> [args...] - Load/link .o(s), call a function (stage 3, see README)
   retron <file.retro> - Run a Retron language script (variables/loops/if)
   sleep <seconds> - Pause (any key interrupts)
   hostname [-v] | hostname -s <name> - Show/set hostname (prompt + WiFi)
@@ -162,7 +162,7 @@ ESP-Nix 1.1.1 - Available commands:
 
 ```bash
 root@esp-nix:/$ uname
-ESP-Nix 1.1.1
+ESP-Nix 1.2
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -203,7 +203,7 @@ A declarative OS for ESP32.
 root@esp-nix:/$ uname > sysinfo.txt
 root@esp-nix:/$ echo "more info" >> sysinfo.txt
 root@esp-nix:/$ cat sysinfo.txt
-ESP-Nix 1.1.1
+ESP-Nix 1.2
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -445,7 +445,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 root@esp-nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 1.1.1
+  |:_/ |         OS: ESP-Nix 1.2
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -734,17 +734,28 @@ This only works because a self-contained function (only local variables, no exte
 
 ### runmod
 
-Stage 2 of the ELF loader — the real next step past `runelf`. It loads a genuine `.o` relocatable object file (not a bare `.text` dump), resolves calls to a small whitelist of firmware-exported functions, and calls a named function inside it:
+Stage 3 of the ELF loader — the real next step past `runelf`. It loads genuine `.o` relocatable object files (not a bare `.text` dump), with real global data (`.rodata`/`.data`/`.bss`, not just code), resolves calls to a whitelist of firmware-exported functions (including memory management — `malloc`/`free`/etc.), links multiple object files together if more than one is given, and calls a named function inside them with up to 6 arguments:
 
 ```bash
 root@esp-nix:/$ runmod /sd/callext.o run_with_callback 3 4
 [runmod host_print] 7
 Result: 7
+
+root@esp-nix:/$ runmod /sd/file_a.o /sd/file_b.o use_add_ten 5
+Result: 30
 ```
 
-`runmod <path.o> <function> [a] [b]` — same `int(int,int)`/`int()` signature convention as `runelf`. The difference is what happens during loading: it parses the object file's `.rela.text`, `.symtab`, and `.strtab`, and for every `R_XTENSA_32` relocation against an *undefined* symbol (the literal-pool entry Xtensa's `-mlongcalls` generates for an external call), it looks the symbol's name up in a small firmware-side whitelist (`kRunmodSymbols` in `src/commands.h` — currently just `host_print(int)`, which prints via Serial) and patches in the resolved address before copying the section into executable RAM. Calling a function that isn't in that whitelist fails with a clear "unresolved symbol" error rather than crashing.
+`runmod <file.o> [file2.o ...] [--] <function> [arg1] [arg2] ...` — up to 6 arguments, each a decimal or `0x`-prefixed hex integer (register-sized: an `int`, or an address treated as an integer). A bare `--` only matters if a function name could otherwise be mistaken for a filename; normally the first argument that isn't an existing file is treated as the function name.
 
-Implementation lives in `src/elfloader.h` (`ElfModule`) — a minimal ELF32 parser, not a general one: no program headers, no multi-file linking, and only relocations against *undefined* symbols are handled (a reference to something else defined in the same object file is skipped rather than guessed at, since only `.text` is loaded). Growing what loaded code can do is now mostly a matter of adding more entries to `kRunmodSymbols` and handling relocations against symbols defined within the module itself.
+What happens during loading, in order:
+1. Every given file's `.text`, `.rodata` (matched by prefix — gas often names it `.rodata.str1.4` for string literals, not plain `.rodata`), `.data`, and `.bss` are each allocated their own memory (`.text` in executable RAM via `heap_caps_malloc(MALLOC_CAP_EXEC)`, since IRAM on the ESP32 only supports 32-bit-aligned accesses — `.rodata`/`.data`/`.bss` are ordinary RAM).
+2. Every file's externally-visible (non-`static`) symbols are collected into one combined table, so multiple files can reference each other.
+3. Every `R_XTENSA_32` relocation in every file's `.rela.text`/`.rela.rodata`/`.rela.data` is resolved: an undefined symbol checks the cross-file table first, then the firmware whitelist (`kRunmodSymbols` in `src/commands.h`); a symbol defined within the same file's own sections resolves to that section's real address. A relocation against a local/static symbol targets the enclosing section symbol with the real offset baked into the pre-relocation bytes rather than into the addend field — both are added together, confirmed against this toolchain's actual output rather than assumed from the ELF spec.
+4. A named function is called through a generic 6-argument function pointer, with unused argument slots zero-filled — safe because Xtensa's windowed calling convention passes the first 6 register-sized arguments the same way regardless of how many the callee's real signature declares.
+
+Calling an unresolved symbol, an unsupported relocation, or a nonexistent function all fail with a specific error rather than crashing.
+
+`kRunmodSymbols` currently exports `host_print` (a test function, prints via Serial) plus `malloc`/`free`/`calloc`/`realloc`/`memcpy`/`memset`/`memmove`/`memcmp`/`strlen`/`strcpy`/`strncpy`/`strcmp`/`strncmp`/`strcat`/`strchr`. Implementation lives in `src/elfloader.h` (`ElfModule`) — still a minimal parser, not a general linker: no program headers, and only `R_XTENSA_32` relocations are handled (the other types `-mlongcalls` emits are linker-relaxation metadata, irrelevant since nothing here relaxes calls).
 
 Building a compatible `.o` is simpler than `runelf`'s recipe — just stop after the compile step, no `objcopy` needed:
 

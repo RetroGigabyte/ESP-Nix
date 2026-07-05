@@ -30,8 +30,29 @@ extern "C" void host_print(int value) {
   Serial.println("[runmod host_print] " + String(value));
 }
 
+// libc functions loaded modules can call for their own memory
+// management and basic string/buffer work - a genuine library (rather
+// than a pure-arithmetic test function) needs these almost immediately.
+// Taking their addresses directly works with no wrapper needed, since
+// they're already plain C-linkage symbols matching the exact names a
+// compiled module's own `extern` declarations would reference.
 static const ExportedSymbol kRunmodSymbols[] = {
   {"host_print", (void*)host_print},
+  {"malloc", (void*)malloc},
+  {"free", (void*)free},
+  {"calloc", (void*)calloc},
+  {"realloc", (void*)realloc},
+  {"memcpy", (void*)memcpy},
+  {"memset", (void*)memset},
+  {"memmove", (void*)memmove},
+  {"memcmp", (void*)memcmp},
+  {"strlen", (void*)strlen},
+  {"strcpy", (void*)strcpy},
+  {"strncpy", (void*)strncpy},
+  {"strcmp", (void*)strcmp},
+  {"strncmp", (void*)strncmp},
+  {"strcat", (void*)strcat},
+  {"strchr", (void*)strchr},
   {nullptr, nullptr}
 };
 
@@ -1063,34 +1084,70 @@ private:
     return true;
   }
 
-  // runmod <path.o> <function> [a] [b] - stage-2 native-code loader.
-  // Unlike runelf (which needs a bare .text dump with zero relocations),
-  // this loads a genuine .o file, resolves calls to firmware-exported
-  // functions (see kRunmodSymbols above), and calls a named function
-  // within it by symbol name. This is the real prerequisite for loading
-  // anything nontrivial from SD - proves relocation + symbol resolution
-  // work, not just "copy bytes and jump" like runelf.
+  // Parses "123" or "0x7f"-style tokens into a uint32_t, for runmod's
+  // argument list (also useful for passing addresses around manually).
+  uint32_t parseU32(const String& token) {
+    if (token.startsWith("0x") || token.startsWith("0X")) {
+      return (uint32_t)strtoul(token.c_str() + 2, nullptr, 16);
+    }
+    return (uint32_t)strtoul(token.c_str(), nullptr, 10);
+  }
+
+  // runmod <file.o> [file2.o ...] [--] <function> [arg1] [arg2] ... -
+  // stage-3 native-code loader/linker. Unlike runelf (which needs a bare
+  // .text dump with zero relocations), this loads one or more genuine
+  // .o files - with .text/.rodata/.data/.bss, not just .text - resolves
+  // calls to firmware-exported functions (see kRunmodSymbols above) and
+  // to each other if more than one file is given, and calls a named
+  // function by symbol name with up to 6 register-sized (int or
+  // pointer-as-integer) arguments. A bare "--" is only needed to
+  // disambiguate when the function name itself could be mistaken for a
+  // filename; without one, the last file-shaped-looking argument before
+  // a name that isn't a real file is treated as the function name.
   bool cmdRunmod(const std::vector<String>& args) {
     if (args.size() < 3) {
-      term.println("Usage: runmod <path.o> <function> [a] [b]");
-      term.println("With a and b: calls <function> as int(int,int).");
-      term.println("With neither: calls it as int().");
+      term.println("Usage: runmod <file.o> [file2.o ...] [--] <function> [arg1] [arg2] ...");
+      term.println("Up to 6 arguments, each a decimal or 0x-prefixed hex integer.");
       return true;
     }
 
-    String path = fs.resolvePath(args[1]);
-    String funcName = args[2];
-    bool hasArgs = args.size() >= 5;
-    int a = hasArgs ? args[3].toInt() : 0;
-    int b = hasArgs ? args[4].toInt() : 0;
+    std::vector<String> files;
+    String funcName;
+    std::vector<String> callArgs;
 
-    if (!fs.exists(path)) {
-      term.println("runmod: no such file: " + path);
+    size_t i = 1;
+    for (; i < args.size(); i++) {
+      if (args[i] == "--") {
+        i++;
+        break;
+      }
+      String resolved = fs.resolvePath(args[i]);
+      if (fs.exists(resolved)) {
+        files.push_back(resolved);
+      } else {
+        break;  // first non-existent-file argument is the function name
+      }
+    }
+
+    if (files.empty()) {
+      term.println("runmod: no valid .o file given");
+      return true;
+    }
+    if (i >= args.size()) {
+      term.println("runmod: no function name given");
+      return true;
+    }
+
+    funcName = args[i];
+    for (i = i + 1; i < args.size(); i++) callArgs.push_back(args[i]);
+
+    if (callArgs.size() > 6) {
+      term.println("runmod: at most 6 arguments are supported");
       return true;
     }
 
     ElfModule mod(fs, term);
-    if (!mod.load(path, kRunmodSymbols)) {
+    if (!mod.load(files, kRunmodSymbols)) {
       return true;  // load() already printed a specific error
     }
 
@@ -1099,9 +1156,11 @@ private:
       return true;
     }
 
-    int result;
-    bool ok = hasArgs ? mod.callInt2(funcName, a, b, result) : mod.callInt0(funcName, result);
-    if (!ok) {
+    std::vector<uint32_t> parsedArgs;
+    for (const auto& a : callArgs) parsedArgs.push_back(parseU32(a));
+
+    uint32_t result;
+    if (!mod.call(funcName, parsedArgs, result)) {
       term.println("runmod: call failed");
       return true;
     }
@@ -1543,7 +1602,7 @@ private:
   }
 
   bool cmdHelp(const std::vector<String>& args) {
-    out("ESP-Nix 1.1.1 - Available commands:");
+    out("ESP-Nix 1.2 - Available commands:");
     out("  help        - Show this help");
     out("  ls [-l] [path] - List directory (-l for permissions/size/date)");
     out("  pwd         - Print working directory");
@@ -1598,7 +1657,7 @@ private:
     out("  rmali <name> - Remove an alias created by mkali");
     out("  ls-ali - List aliases (what each runs, and whether it's set to run at boot)");
     out("  runelf <path> [a] [b] - Run a self-contained compiled Xtensa function (stage 1, see README)");
-    out("  runmod <path.o> <fn> [a] [b] - Run a .o with real relocations/symbol resolution (stage 2, see README)");
+    out("  runmod <file.o> [file2.o ...] [--] <fn> [args...] - Load/link .o(s), call a function (stage 3, see README)");
     out("  retron <file.retro> - Run a Retron language script (variables/loops/if)");
     out("  sleep <seconds> - Pause (any key interrupts)");
     out("  hostname [-v] | hostname -s <name> - Show/set hostname (prompt + WiFi)");
@@ -1696,7 +1755,7 @@ private:
   // info as readable pseudo-files rather than only via commands.
   bool getProcContent(const String& path, String& content) {
     if (path == "/proc/version") {
-      content = "ESP-Nix version 1.1.1 (FreeRTOS) Xtensa\n";
+      content = "ESP-Nix version 1.2 (FreeRTOS) Xtensa\n";
       return true;
     }
     if (path == "/proc/uptime") {
@@ -1862,7 +1921,7 @@ private:
   }
 
   bool cmdUname(const std::vector<String>& args) {
-    out("ESP-Nix 1.1.1");
+    out("ESP-Nix 1.2");
     out("System: ESP32 WROOM32E");
     out("Arch: Xtensa");
     out("Kernel: FreeRTOS");
@@ -1914,7 +1973,7 @@ private:
     std::vector<String> info;
     info.push_back("root@esp-nix");
     info.push_back("------------");
-    info.push_back("OS: ESP-Nix 1.1.1");
+    info.push_back("OS: ESP-Nix 1.2");
     info.push_back("Host: ESP32 WROOM32E");
     info.push_back("Kernel: FreeRTOS");
     info.push_back("Uptime: " + formatUptime(millis() / 1000));
