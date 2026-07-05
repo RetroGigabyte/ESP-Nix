@@ -35,6 +35,7 @@ A minimal declarative operating system for ESP32 with a Unix-like shell interfac
 - **`ftp get`/`put`/`ls`**: FTP client for pushing/pulling files to/from a remote FTP server
 - **`retron`**: runs [Retron](https://github.com/RetroGigabyte/Retron) scripts — real variables, `if`/`loop`/functions, `INPUT`/`OPEN`/`READ`/`WRITE`/`LOAD`/`QUIT`, genuinely new logic beyond what `/system`/`/boot` scripts can sequence
 - **`mkali`/`rmali`/`ls-ali`**: alias any script (`.sh`/`.retro`/`.elf`, including ones on `/sd`) to run by a short name from anywhere, optionally at boot too - list or remove aliases
+- **`/sd/drivers`**: any `.elf`/`.o` placed there runs automatically at boot, no alias needed
 - **`runelf`**: stage-1 loader for compiled Xtensa machine code from SD (fixed signature, no relocations yet) - the first step toward a real native-code ELF loader
 - **`PATH`**: `/system`-style script directories now configurable (colon-separated) in `/etc/settings/esp-nix.conf`, checked in order for a matching command
 - **`sleep <seconds>`**: pauses, interruptible by any keypress
@@ -94,7 +95,7 @@ After booting, you'll see the shell prompt:
 
 ```
 root@esp-nix:/$ help
-ESP-Nix 1.2 - Available commands:
+ESP-Nix 1.2.1 - Available commands:
   help        - Show this help
   ls [-l] [path] - List directory (-l for permissions/size/date)
   pwd         - Print working directory
@@ -148,6 +149,7 @@ ESP-Nix 1.2 - Available commands:
   mkali <source> <name> [-boot] - Alias a .sh/.retro/.elf (anywhere, incl. /sd) to run as <name>
   rmali <name> - Remove an alias created by mkali
   ls-ali - List aliases (what each runs, and whether it's set to run at boot)
+  /sd/drivers/*.elf,*.o - Run automatically at boot, no alias needed (.o needs a main())
   runelf <path> [a] [b] - Run a self-contained compiled Xtensa function (stage 1, see README)
   runmod <file.o> [file2.o ...] [--] <fn> [args...] - Load/link .o(s), call a function (stage 3, see README)
   retron <file.retro> - Run a Retron language script (variables/loops/if)
@@ -162,7 +164,7 @@ ESP-Nix 1.2 - Available commands:
 
 ```bash
 root@esp-nix:/$ uname
-ESP-Nix 1.2
+ESP-Nix 1.2.1
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -203,7 +205,7 @@ A declarative OS for ESP32.
 root@esp-nix:/$ uname > sysinfo.txt
 root@esp-nix:/$ echo "more info" >> sysinfo.txt
 root@esp-nix:/$ cat sysinfo.txt
-ESP-Nix 1.2
+ESP-Nix 1.2.1
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -445,7 +447,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 root@esp-nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 1.2
+  |:_/ |         OS: ESP-Nix 1.2.1
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -703,6 +705,18 @@ root@esp-nix:/$ rmali watcher
 Removed alias 'watcher' from /system
 Removed 'watcher' from /boot
 ```
+
+### /sd/drivers - compiled programs that run at boot with no alias needed
+
+Any `.elf` or `.o` file placed directly in `/sd/drivers` runs automatically at every startup, in alphabetical order - no `mkali ... -boot` step required, since a "driver" is meant to just always be there rather than be a named command you'd also run interactively:
+
+```
+[driver] sensor.elf
+[driver] watchdog.o
+```
+
+- A `.elf` runs the same zero-argument way `runelf` already supports for boot use.
+- A `.o` is loaded via `runmod` and must export a function literally named `main` as its entry point - there's no other way to know which function in an arbitrary object file should run automatically. One missing `main()` prints a warning and is skipped, without stopping the rest of boot.
 
 ### runelf
 

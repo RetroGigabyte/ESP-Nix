@@ -180,6 +180,10 @@ void setup() {
   // Run any startup scripts in /boot, in order (like /etc/init.d)
   shell.runBootScripts();
 
+  // Run any .elf/.o driver programs in /sd/drivers, in order - no mkali
+  // alias needed for these, unlike /system or /boot
+  shell.runDriverPrograms();
+
   // Restore command history from /data/history.txt, if any exists
   shell.loadHistory();
 

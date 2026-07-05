@@ -1,4 +1,4 @@
-# ESP-Nix v1.2
+# ESP-Nix v1.2.1
 
 A declarative, Unix-like shell operating system for the ESP32 — built from scratch on FreeRTOS, running entirely off an I2C LCD and a serial console (with optional SD card, PS/2 keyboard, and WiFi).
 
@@ -69,6 +69,10 @@ The `nixfetch` snapshot on `web`'s file manager page rendered as an empty `<pre>
 ## Bug Fix (v0.9.1.1): backup -m failed on the filesystem root
 
 `backup -m` compresses internal storage root (`/`) directly, but `Archiver::compressZip()` computes a wrapping directory name from the last path segment - for `/` itself, that's an empty string, producing an invalid zip entry name (`/`) that miniz rejects with "Failed to add directory entry: /". Fixed by special-casing root: instead of wrapping everything in a (nonexistent) top-level folder, `/`'s direct children are added to the zip individually, with no wrapping folder at all - which is also the more useful behavior for a backup, since restoring extracts straight back onto `/` without an extra nested layer.
+
+## New in v1.2.1: `/sd/drivers` - compiled programs that run at boot with no alias needed
+
+Any `.elf` or `.o` file placed directly in `/sd/drivers` now runs automatically at every startup, in alphabetical order, without needing an `mkali ... -boot` alias first - a "driver" is meant to just always be there rather than also be a named interactive command. A `.elf` runs the same zero-argument way `runelf` already supports for boot use; a `.o` is loaded via `runmod` and must export a function literally named `main` as its entry point (there's no other way to know which function in an arbitrary object file should run automatically) - one missing `main()` prints a warning and is skipped without stopping the rest of boot. Implemented as `Commands::runDriverPrograms()`, called from `main.cpp` right after `/boot/*.sh` scripts.
 
 ## New in v1.2: `runmod` stage 3 - global data, memory management, and multi-file linking
 

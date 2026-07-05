@@ -95,8 +95,14 @@ public:
     commands.runBootScripts();
   }
 
+  // Runs every .elf/.o "driver" program in /sd/drivers at startup, in
+  // alphabetical order - no mkali alias needed, unlike /system or /boot.
+  void runDriverPrograms() {
+    commands.runDriverPrograms();
+  }
+
   void init() {
-    term.println("ESP-Nix 1.2");
+    term.println("ESP-Nix 1.2.1");
     term.println("Type 'help' for command list\n");
   }
 

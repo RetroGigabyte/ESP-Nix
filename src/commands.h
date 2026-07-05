@@ -1281,6 +1281,43 @@ public:
     }
   }
 
+  // Runs every .elf/.o "driver" program in /sd/drivers, in alphabetical
+  // order, at startup - no mkali alias needed, unlike /system or /boot
+  // scripts. A .elf is called the same zero-argument way runelf already
+  // supports for boot use (see runelf's own -boot support in mkali). A
+  // .o is loaded via runmod and expected to export a function literally
+  // named "main" as its entry point, since there's no other way to know
+  // which function in an arbitrary object file should run automatically -
+  // one missing from a given .o is reported and skipped, not fatal to
+  // the rest of boot.
+  void runDriverPrograms() {
+    const char* driversDir = "/sd/drivers";
+    if (!fs.sdAvailable() || !fs.exists(driversDir) || !fs.isDir(driversDir)) return;
+
+    std::vector<String> names = fs.listDir(driversDir);
+    std::sort(names.begin(), names.end());
+
+    for (const auto& name : names) {
+      String path = String(driversDir) + "/" + name;
+
+      if (name.endsWith(".elf")) {
+        term.println("[driver] " + name);
+        cmdRunelf({"runelf", path});
+      } else if (name.endsWith(".o")) {
+        term.println("[driver] " + name);
+        ElfModule mod(fs, term);
+        if (!mod.load({path}, kRunmodSymbols)) continue;
+        if (!mod.hasFunction("main")) {
+          term.println("driver: " + name + " has no main() entry point - skipping");
+          continue;
+        }
+        uint32_t result;
+        std::vector<uint32_t> noArgs;
+        mod.call("main", noArgs, result);
+      }
+    }
+  }
+
 private:
 
   bool cmdExtract(const std::vector<String>& args) {
@@ -1602,7 +1639,7 @@ private:
   }
 
   bool cmdHelp(const std::vector<String>& args) {
-    out("ESP-Nix 1.2 - Available commands:");
+    out("ESP-Nix 1.2.1 - Available commands:");
     out("  help        - Show this help");
     out("  ls [-l] [path] - List directory (-l for permissions/size/date)");
     out("  pwd         - Print working directory");
@@ -1656,6 +1693,7 @@ private:
     out("  mkali <source> <name> [-boot] - Alias a .sh/.retro/.elf (anywhere, incl. /sd) to run as <name>");
     out("  rmali <name> - Remove an alias created by mkali");
     out("  ls-ali - List aliases (what each runs, and whether it's set to run at boot)");
+    out("  /sd/drivers/*.elf,*.o - Run automatically at boot, no alias needed (.o needs a main())");
     out("  runelf <path> [a] [b] - Run a self-contained compiled Xtensa function (stage 1, see README)");
     out("  runmod <file.o> [file2.o ...] [--] <fn> [args...] - Load/link .o(s), call a function (stage 3, see README)");
     out("  retron <file.retro> - Run a Retron language script (variables/loops/if)");
@@ -1755,7 +1793,7 @@ private:
   // info as readable pseudo-files rather than only via commands.
   bool getProcContent(const String& path, String& content) {
     if (path == "/proc/version") {
-      content = "ESP-Nix version 1.2 (FreeRTOS) Xtensa\n";
+      content = "ESP-Nix version 1.2.1 (FreeRTOS) Xtensa\n";
       return true;
     }
     if (path == "/proc/uptime") {
@@ -1921,7 +1959,7 @@ private:
   }
 
   bool cmdUname(const std::vector<String>& args) {
-    out("ESP-Nix 1.2");
+    out("ESP-Nix 1.2.1");
     out("System: ESP32 WROOM32E");
     out("Arch: Xtensa");
     out("Kernel: FreeRTOS");
@@ -1973,7 +2011,7 @@ private:
     std::vector<String> info;
     info.push_back("root@esp-nix");
     info.push_back("------------");
-    info.push_back("OS: ESP-Nix 1.2");
+    info.push_back("OS: ESP-Nix 1.2.1");
     info.push_back("Host: ESP32 WROOM32E");
     info.push_back("Kernel: FreeRTOS");
     info.push_back("Uptime: " + formatUptime(millis() / 1000));
