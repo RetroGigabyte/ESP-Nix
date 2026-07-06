@@ -1,0 +1,18 @@
+# Tests real per-call local variable scope: factorial(5) via recursion.
+# Before local scoping, every recursive call shared the same global /n,
+# so nested calls would corrupt each other's copy of n.
+# Run: retron recursion_test.retro
+
+/result = 0
+READ "factorial" 5
+print "factorial(5) = " & /retval
+
+$"factorial" n
+if /n <= 1
+  RETURN 1
+END
+/nm1 = /n - 1
+READ "factorial" /nm1
+/sub = /retval
+RETURN /n * /sub
+$

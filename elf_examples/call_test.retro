@@ -1,0 +1,9 @@
+# Tests CALL - bridging Retron to compiled native code via the same
+# loader runmod uses. multifn.o's sum_of_squares(a,b) calls a separate
+# square() function twice, then reports the result via host_print - all
+# proven working natively; this confirms Retron can drive the same
+# mechanism.
+# Run: retron call_test.retro (multifn.o must be alongside this script)
+
+CALL "multifn.o" "sum_of_squares" result 3 4
+print "sum_of_squares(3,4) via CALL = " & /result

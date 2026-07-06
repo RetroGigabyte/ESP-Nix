@@ -102,7 +102,7 @@ public:
   }
 
   void init() {
-    term.println("ESP-Nix 1.2.1");
+    term.println("ESP-Nix 1.3");
     term.println("Type 'help' for command list\n");
   }
 

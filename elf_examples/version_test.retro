@@ -1,0 +1,5 @@
+# Tests the shared OS version string, readable from Retron the same way
+# a loaded C module reads it via host_os_version().
+# Run: retron version_test.retro
+
+print "ESP-Nix version (from Retron): " & /version

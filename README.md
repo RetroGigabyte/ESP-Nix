@@ -95,7 +95,7 @@ After booting, you'll see the shell prompt:
 
 ```
 root@esp-nix:/$ help
-ESP-Nix 1.2.1 - Available commands:
+ESP-Nix 1.3 - Available commands:
   help        - Show this help
   ls [-l] [path] - List directory (-l for permissions/size/date)
   pwd         - Print working directory
@@ -152,7 +152,7 @@ ESP-Nix 1.2.1 - Available commands:
   /sd/drivers/*.elf,*.o - Run automatically at boot, no alias needed (.o needs a main())
   runelf <path> [a] [b] - Run a self-contained compiled Xtensa function (stage 1, see README)
   runmod <file.o> [file2.o ...] [--] <fn> [args...] - Load/link .o(s), call a function (stage 3, see README)
-  retron <file.retro> - Run a Retron language script (variables/loops/if)
+  retron <file.retro> - Run a Retron language script (variables/loops/if/functions/CALL)
   sleep <seconds> - Pause (any key interrupts)
   hostname [-v] | hostname -s <name> - Show/set hostname (prompt + WiFi)
   backup -m|-l|-r# - Back up/list/restore internal storage to/from SD
@@ -164,7 +164,7 @@ ESP-Nix 1.2.1 - Available commands:
 
 ```bash
 root@esp-nix:/$ uname
-ESP-Nix 1.2.1
+ESP-Nix 1.3
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -205,7 +205,7 @@ A declarative OS for ESP32.
 root@esp-nix:/$ uname > sysinfo.txt
 root@esp-nix:/$ echo "more info" >> sysinfo.txt
 root@esp-nix:/$ cat sysinfo.txt
-ESP-Nix 1.2.1
+ESP-Nix 1.3
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -447,7 +447,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 root@esp-nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 1.2.1
+  |:_/ |         OS: ESP-Nix 1.3
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -531,12 +531,42 @@ print "You entered: " & /response
 **File I/O and modules** (ported from `retron.py`'s reference implementation):
 
 - `OPEN file` — prints a file's whole content, bracketed with `--- file ---`/`--- End ---`
-- `READ "function_name"` — calls a defined function inline; `READ file line#` — prints one line (1-indexed) from a file
+- `READ "function_name" [arg1] [arg2] ...` — calls a defined function inline, passing arguments to its declared parameters; `READ file line#` — prints one line (1-indexed) from a file
 - `WRITE "text" file` / `WRITE /var file` — appends a line to a file
 - `LOAD file.retro` — runs a sub-script, sharing variables both ways (changes the sub-script makes are visible after it returns)
 - `QUIT` — stops the script immediately, even from inside a `loop`/`if`
 
 Filenames without a leading `/` resolve relative to the directory the running script itself was loaded from, so a script can reference sibling files by plain name regardless of where it's invoked from.
+
+**Functions now take real parameters, have real local scope, and support recursion.** A function definition can declare parameter names after its quoted name; each call gets its own isolated local scope (a real call frame, not just shared globals), so a function's parameters and any variables it assigns don't leak into or collide with the caller's — including across recursive calls to itself:
+
+```
+# factorial.retro
+READ "factorial" 5
+print "5! = " & /retval
+
+$"factorial" n
+if /n <= 1
+  RETURN 1
+END
+/nm1 = /n - 1
+READ "factorial" /nm1
+RETURN /n * /retval
+$
+```
+
+`RETURN <expr>` stops the current function immediately (even from inside a `loop`/`if`) and stores its value where the caller reads it back: the ordinary global variable `/retval`. Before this, functions were jump-and-return only — no parameters, no isolated locals, no way to hand back a result — so a recursive call would silently corrupt its own copy of every variable it shared with the caller (there was only ever one global `/n`, not a fresh one per call).
+
+**`CALL` bridges Retron to compiled native code** — the same loader `runmod` uses (real relocations, real firmware symbol resolution), for anything Retron itself is slow or awkward at:
+
+```
+CALL "sum_of_squares.o" "sum_of_squares" result 3 4
+print "sum_of_squares(3,4) = " & /result
+```
+
+`CALL "file.o" "function" resultVar [arg1] [arg2] ...` — loads the `.o`, calls `function` with up to 6 arguments (decimal or `0x`-hex), and stores its return value in `resultVar` (a plain global, read the same way `/retval` is). See `runmod`'s section below for exactly what a compatible `.o` looks like and how to build one.
+
+**The OS version is readable as `/version`** (a string variable, e.g. `1.3`) — the same version compiled modules read via `host_os_version()`, both pulling from the single `ESP_NIX_VERSION` definition in `src/version.h`.
 
 ### User Profile Framework (early)
 
@@ -769,7 +799,13 @@ What happens during loading, in order:
 
 Calling an unresolved symbol, an unsupported relocation, or a nonexistent function all fail with a specific error rather than crashing.
 
-`kRunmodSymbols` currently exports `host_print` (a test function, prints via Serial) plus `malloc`/`free`/`calloc`/`realloc`/`memcpy`/`memset`/`memmove`/`memcmp`/`strlen`/`strcpy`/`strncpy`/`strcmp`/`strncmp`/`strcat`/`strchr`. Implementation lives in `src/elfloader.h` (`ElfModule`) — still a minimal parser, not a general linker: no program headers, and only `R_XTENSA_32` relocations are handled (the other types `-mlongcalls` emits are linker-relaxation metadata, irrelevant since nothing here relaxes calls).
+`kRunmodSymbols` (now in its own `src/hostsymbols.h`, shared with Retron's `CALL` command below) exports `host_print`/`host_os_version` (test functions) plus `malloc`/`free`/`calloc`/`realloc`/`memcpy`/`memset`/`memmove`/`memcmp`/`strlen`/`strcpy`/`strncpy`/`strcmp`/`strncmp`/`strcat`/`strchr`. Implementation lives in `src/elfloader.h` (`ElfModule`) — still a minimal parser, not a general linker: no program headers, and only `R_XTENSA_32` and (as of stress-testing against real mbedTLS source) `R_XTENSA_SLOT0_OP` relocations are handled.
+
+**Verified against real mbedTLS source, not just synthetic tests** — compiling mbedTLS's actual unmodified `sha256.c` and loading it found two real relocator bugs, both fixed:
+- `R_XTENSA_SLOT0_OP` isn't always linker-relaxation metadata safe to ignore. For an `L32R` (loading a literal), it is - gas already knows the literal's fixed local position. But for a `CALL8` targeting a symbol with *external/global* linkage - even one defined in the same file, like one public mbedTLS function calling another - gas leaves the call's target offset as a placeholder for a real linker to fill in; skipping it left the call jumping to garbage. Fixed by decoding the instruction's opcode (bits `[3:0]`) to distinguish the two, and patching `CALL8`'s PC-relative offset field (bits `[23:6]`) correctly for the latter case.
+- The "placeholder bytes carry the real offset" heuristic (needed for local/static symbols, which gas targets via the enclosing section symbol) was being applied unconditionally, including to genuinely external symbols like `memcpy` - whose placeholder isn't guaranteed to be zero, silently corrupting an otherwise-correctly-resolved address once a file had enough diverse external references. Fixed by only applying it when the symbol isn't external.
+
+With both fixes, a genuine, unmodified mbedTLS SHA-256 implementation computes correct hashes when loaded and called this way - confirmed against the real `SHA256("abc")` test vector.
 
 Building a compatible `.o` is simpler than `runelf`'s recipe — just stop after the compile step, no `objcopy` needed:
 

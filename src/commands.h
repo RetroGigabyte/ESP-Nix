@@ -19,42 +19,7 @@
 #include "ftpclient/ESP32_FTPClient.h"
 #include "esp_heap_caps.h"
 #include "elfloader.h"
-
-// The firmware-exported symbol table for runmod: functions a loaded
-// module's undefined external references can be resolved against. Must
-// be declared extern "C" so the linker uses the plain, unmangled name a
-// C object file would reference (e.g. "host_print", not some C++-mangled
-// form) - this is what lets a module's `extern void host_print(int);`
-// resolve correctly.
-extern "C" void host_print(int value) {
-  Serial.println("[runmod host_print] " + String(value));
-}
-
-// libc functions loaded modules can call for their own memory
-// management and basic string/buffer work - a genuine library (rather
-// than a pure-arithmetic test function) needs these almost immediately.
-// Taking their addresses directly works with no wrapper needed, since
-// they're already plain C-linkage symbols matching the exact names a
-// compiled module's own `extern` declarations would reference.
-static const ExportedSymbol kRunmodSymbols[] = {
-  {"host_print", (void*)host_print},
-  {"malloc", (void*)malloc},
-  {"free", (void*)free},
-  {"calloc", (void*)calloc},
-  {"realloc", (void*)realloc},
-  {"memcpy", (void*)memcpy},
-  {"memset", (void*)memset},
-  {"memmove", (void*)memmove},
-  {"memcmp", (void*)memcmp},
-  {"strlen", (void*)strlen},
-  {"strcpy", (void*)strcpy},
-  {"strncpy", (void*)strncpy},
-  {"strcmp", (void*)strcmp},
-  {"strncmp", (void*)strncmp},
-  {"strcat", (void*)strcat},
-  {"strchr", (void*)strchr},
-  {nullptr, nullptr}
-};
+#include "hostsymbols.h"
 
 class Commands {
 private:
@@ -1639,7 +1604,7 @@ private:
   }
 
   bool cmdHelp(const std::vector<String>& args) {
-    out("ESP-Nix 1.2.1 - Available commands:");
+    out("ESP-Nix 1.3 - Available commands:");
     out("  help        - Show this help");
     out("  ls [-l] [path] - List directory (-l for permissions/size/date)");
     out("  pwd         - Print working directory");
@@ -1696,7 +1661,7 @@ private:
     out("  /sd/drivers/*.elf,*.o - Run automatically at boot, no alias needed (.o needs a main())");
     out("  runelf <path> [a] [b] - Run a self-contained compiled Xtensa function (stage 1, see README)");
     out("  runmod <file.o> [file2.o ...] [--] <fn> [args...] - Load/link .o(s), call a function (stage 3, see README)");
-    out("  retron <file.retro> - Run a Retron language script (variables/loops/if)");
+    out("  retron <file.retro> - Run a Retron language script (variables/loops/if/functions/CALL)");
     out("  sleep <seconds> - Pause (any key interrupts)");
     out("  hostname [-v] | hostname -s <name> - Show/set hostname (prompt + WiFi)");
     out("  backup -m|-l|-r# - Back up/list/restore internal storage to/from SD");
@@ -1793,7 +1758,7 @@ private:
   // info as readable pseudo-files rather than only via commands.
   bool getProcContent(const String& path, String& content) {
     if (path == "/proc/version") {
-      content = "ESP-Nix version 1.2.1 (FreeRTOS) Xtensa\n";
+      content = "ESP-Nix version 1.3 (FreeRTOS) Xtensa\n";
       return true;
     }
     if (path == "/proc/uptime") {
@@ -1959,7 +1924,7 @@ private:
   }
 
   bool cmdUname(const std::vector<String>& args) {
-    out("ESP-Nix 1.2.1");
+    out("ESP-Nix 1.3");
     out("System: ESP32 WROOM32E");
     out("Arch: Xtensa");
     out("Kernel: FreeRTOS");
@@ -2011,7 +1976,7 @@ private:
     std::vector<String> info;
     info.push_back("root@esp-nix");
     info.push_back("------------");
-    info.push_back("OS: ESP-Nix 1.2.1");
+    info.push_back("OS: ESP-Nix 1.3");
     info.push_back("Host: ESP32 WROOM32E");
     info.push_back("Kernel: FreeRTOS");
     info.push_back("Uptime: " + formatUptime(millis() / 1000));

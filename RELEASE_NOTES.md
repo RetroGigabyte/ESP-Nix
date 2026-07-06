@@ -1,4 +1,4 @@
-# ESP-Nix v1.2.1
+# ESP-Nix v1.3
 
 A declarative, Unix-like shell operating system for the ESP32 — built from scratch on FreeRTOS, running entirely off an I2C LCD and a serial console (with optional SD card, PS/2 keyboard, and WiFi).
 
@@ -69,6 +69,23 @@ The `nixfetch` snapshot on `web`'s file manager page rendered as an empty `<pre>
 ## Bug Fix (v0.9.1.1): backup -m failed on the filesystem root
 
 `backup -m` compresses internal storage root (`/`) directly, but `Archiver::compressZip()` computes a wrapping directory name from the last path segment - for `/` itself, that's an empty string, producing an invalid zip entry name (`/`) that miniz rejects with "Failed to add directory entry: /". Fixed by special-casing root: instead of wrapping everything in a (nonexistent) top-level folder, `/`'s direct children are added to the zip individually, with no wrapping folder at all - which is also the more useful behavior for a backup, since restoring extracts straight back onto `/` without an extra nested layer.
+
+## New in v1.3: Retron gets real functions (parameters, local scope, recursion) and a bridge to compiled code
+
+Retron functions previously shared one flat global variable namespace with no parameters and no way to return a value - jump-and-return only. A function definition can now declare parameter names after its quoted name (`$"factorial" n`), and every call gets its own isolated local scope: a real call frame, not just shared globals, so a function's parameters and any variables it assigns don't leak into or collide with the caller's - including across recursive calls to itself. `RETURN <expr>` stops the function immediately (even from inside a `loop`/`if`) and stores its value in the ordinary global `/retval` for the caller to read. Verified on real hardware with a genuinely recursive `factorial(5)`, computing the correct `120` - before this change, a recursive call would have silently corrupted its own copy of every variable it shared with the caller, since there was only ever one global `/n`.
+
+`CALL "file.o" "function" resultVar [args...]` bridges Retron to `runmod`'s native-code loader directly - real relocations, real firmware symbol resolution, for anything Retron itself is slow or awkward at. Verified calling `multifn.o`'s `sum_of_squares` from a Retron script and getting the correct result back.
+
+The OS version is now readable as `/version` from Retron and via `host_os_version()` from compiled modules, both pulling from a single `ESP_NIX_VERSION` definition in the new `src/version.h` - along with `src/hostsymbols.h`, which now holds the shared firmware-exported symbol table (`kRunmodSymbols`) so both `runmod` and Retron's `CALL` load against the exact same whitelist.
+
+## New in v1.3: `runmod` verified against real mbedTLS source - two real relocator bugs found and fixed
+
+Stress-tested the ELF loader against mbedTLS's actual, unmodified `sha256.c` (not another synthetic test function) to find out what a genuine third-party library actually needs. Found and fixed two real bugs:
+
+- `R_XTENSA_SLOT0_OP` isn't always safe to skip as linker-relaxation metadata. That's true for an `L32R` (loading a literal - gas already knows its fixed local position), but a `CALL8` targeting a symbol with *external/global* linkage - even one defined in the same file, like one public mbedTLS function calling another - gets a real relocation gas deliberately leaves unfilled for a linker to patch. Skipping it left the call jumping to garbage 2 bytes past itself, crashing with an `IllegalInstruction`. Fixed by decoding the instruction's opcode to distinguish the two cases, and correctly patching `CALL8`'s PC-relative offset field for the latter.
+- The "placeholder bytes carry the real offset" heuristic (needed only for local/static symbols) was being applied unconditionally, including to genuinely external symbols like `memcpy` - whose placeholder isn't guaranteed to be zero. This silently corrupted an otherwise-correctly-resolved external address once a file had enough diverse external references, crashing with a `LoadProhibited` (bad pointer dereference). Fixed by only applying it to the local-symbol case.
+
+With both fixes, the genuine, unmodified mbedTLS SHA-256 implementation computes correct hashes when loaded and called this way - confirmed against the real `SHA256("abc")` test vector byte-for-byte.
 
 ## New in v1.2.1: `/sd/drivers` - compiled programs that run at boot with no alias needed
 

@@ -7,6 +7,9 @@
 #include "filesystem.h"
 #include "terminal.h"
 #include "input.h"
+#include "elfloader.h"
+#include "hostsymbols.h"
+#include "version.h"
 
 // Port of RetroGigabyte/Retron (github.com/RetroGigabyte/Retron) into
 // ESP-Nix, adapted from the reference retron_mac.cpp interpreter. Graphics
@@ -17,6 +20,7 @@
 struct RetronFunctionDef {
   int start;
   int end;
+  std::vector<String> params;
 };
 
 class RetronInterpreter {
@@ -28,6 +32,21 @@ public:
   std::map<String, RetronFunctionDef> functions;
   bool quit = false;
   String scriptDir = "/";  // directory the current script was loaded from, for LOAD's relative paths
+
+  // Local variable scope for function calls (READ "name" arg1 arg2 ...):
+  // each call pushes a new frame here, so a function's parameters and
+  // any variables it assigns don't leak into (or collide with) the
+  // caller's - a real call stack, not just shared globals, which is what
+  // makes recursion actually usable rather than merely not-crashing
+  // (the underlying pc save/restore already nested correctly via the
+  // native C++ call stack even before this, since each executeRead()
+  // invocation has its own local savedPc - but every recursive call
+  // sharing one flat global variable map meant a function like
+  // factorial(n) would corrupt its own /n across recursion levels).
+  std::vector<std::map<String, float>> localVarScope;
+  std::vector<std::map<String, String>> localStrScope;
+  float retval = 0;
+  bool returning = false;
 
   RetronInterpreter(FileSystem& f, Terminal& t) : fs(f), term(t) {}
 
@@ -60,17 +79,40 @@ public:
 
     parseFunctions();
     variables["platform"] = 1;  // 1 = ESP32
+    stringVariables["version"] = ESP_NIX_VERSION;
     return true;
   }
 
+  // A function definition line is $"name" optionally followed by
+  // space-separated parameter names, e.g. $"add" a b - each becomes a
+  // local variable bound to the corresponding argument on every call,
+  // shadowing any global of the same name for the duration of the call
+  // (see localVarScope/localStrScope and the CALL-arg-binding in
+  // executeRead below).
   void parseFunctions() {
     for (size_t i = 0; i < lines.size(); i++) {
-      if (lines[i].startsWith("$\"") && lines[i].endsWith("\"")) {
-        String funcName = lines[i].substring(2, lines[i].length() - 1);
+      if (lines[i].startsWith("$\"")) {
+        int endQuote = lines[i].indexOf('"', 2);
+        if (endQuote < 0) continue;
+        String funcName = lines[i].substring(2, endQuote);
+
+        std::vector<String> params;
+        String rest = lines[i].substring(endQuote + 1);
+        rest.trim();
+        int p = 0;
+        while (p < (int)rest.length()) {
+          int sp = rest.indexOf(' ', p);
+          String tok = (sp >= 0) ? rest.substring(p, sp) : rest.substring(p);
+          tok.trim();
+          if (tok.length() > 0) params.push_back(tok);
+          if (sp < 0) break;
+          p = sp + 1;
+        }
+
         int start = i + 1;
         for (size_t j = start; j < lines.size(); j++) {
           if (lines[j] == "$") {
-            functions[funcName] = {start, (int)j};
+            functions[funcName] = {start, (int)j, params};
             break;
           }
         }
@@ -81,6 +123,7 @@ public:
   void execute() {
     pc = 0;
     quit = false;
+    returning = false;  // a stray RETURN outside any function is meaningless; don't let it linger
     while (pc < (int)lines.size() && !quit) {
       const String& line = lines[pc];
       if ((line.startsWith("$\"")) || line == "$") {
@@ -88,6 +131,7 @@ public:
         continue;
       }
       executeLine(line);
+      returning = false;
       pc++;
     }
   }
@@ -102,6 +146,10 @@ private:
 
     if (t[0] == '/') {
       String varName = t.substring(1);
+      if (!localVarScope.empty()) {
+        if (localStrScope.back().count(varName)) return localStrScope.back()[varName].toFloat();
+        if (localVarScope.back().count(varName)) return localVarScope.back()[varName];
+      }
       if (stringVariables.count(varName)) return stringVariables[varName].toFloat();
       if (variables.count(varName)) return variables[varName];
       return 0;
@@ -223,7 +271,12 @@ private:
     } else if (cmd == "INPUT") {
       String key = args;
       key.trim();
-      stringVariables[key] = readLine();
+      String line = readLine();
+      if (!localVarScope.empty()) {
+        localStrScope.back()[key] = line;
+      } else {
+        stringVariables[key] = line;
+      }
     } else if (cmd == "DRAW") {
       term.println("retron: DRAW needs composite video output, which isn't wired up on this ESP-Nix build yet - skipping.");
     } else if (cmd == "LOOP") {
@@ -238,6 +291,11 @@ private:
       executeWrite(args);
     } else if (cmd == "LOAD") {
       executeLoad(args);
+    } else if (cmd == "CALL") {
+      executeCall(args);
+    } else if (cmd == "RETURN") {
+      retval = args.length() > 0 ? evalExpression(args) : 0;
+      returning = true;
     } else if (cmd == "QUIT") {
       quit = true;
     } else if (lineIn.indexOf('=') >= 0 && lineIn.indexOf('<') < 0 && lineIn.indexOf('>') < 0) {
@@ -259,26 +317,75 @@ private:
     term.println("--- End ---");
   }
 
-  // READ "function_name" runs a defined function inline (like calling
-  // it); READ file line# prints one line (1-indexed) from a file.
+  // READ "function_name" [arg1] [arg2] ... calls a defined function
+  // inline; READ file line# prints one line (1-indexed) from a file.
+  // Each parameter named on the function's $"name" param1 param2 line
+  // gets bound to the corresponding argument (evaluated in the CALLER's
+  // scope, before the new one is pushed) in a fresh local scope frame -
+  // this is what makes recursive calls actually usable rather than just
+  // not-crashing, since each call's variables are isolated from every
+  // other's rather than all sharing one flat global map. RETURN <expr>
+  // inside the function body stores its value where the caller can read
+  // it back via the ordinary global variable /retval.
   void executeRead(const String& args) {
     String a = args;
     a.trim();
 
-    if (a.startsWith("\"") && a.endsWith("\"") && a.length() >= 2) {
-      String funcName = a.substring(1, a.length() - 1);
+    if (a.startsWith("\"")) {
+      int endQuote = a.indexOf('"', 1);
+      if (endQuote < 0) {
+        term.println("ERROR: Unterminated function name");
+        return;
+      }
+      String funcName = a.substring(1, endQuote);
       if (!functions.count(funcName)) {
         term.println("ERROR: Undefined function: " + funcName);
         return;
       }
       RetronFunctionDef def = functions[funcName];
+
+      // Argument tokens are evaluated in the CALLER's current scope
+      // (whatever's on top of the stack right now, or globals if none)
+      // before the new frame is pushed, so a call like
+      // READ "helper" /x passes the CALLER's /x, not an as-yet-unbound
+      // parameter of the same name in the callee.
+      std::vector<float> argValues;
+      String rest = a.substring(endQuote + 1);
+      rest.trim();
+      int p = 0;
+      while (p < (int)rest.length()) {
+        int sp = rest.indexOf(' ', p);
+        String tok = (sp >= 0) ? rest.substring(p, sp) : rest.substring(p);
+        tok.trim();
+        if (tok.length() > 0) argValues.push_back(getValue(tok));
+        if (sp < 0) break;
+        p = sp + 1;
+      }
+
+      std::map<String, float> frame;
+      std::map<String, String> strFrame;
+      for (size_t i = 0; i < def.params.size(); i++) {
+        frame[def.params[i]] = (i < argValues.size()) ? argValues[i] : 0;
+      }
+      localVarScope.push_back(frame);
+      localStrScope.push_back(strFrame);
+
+      bool savedReturning = returning;
+      returning = false;
+
       int savedPc = pc;
       pc = def.start;
-      while (pc < def.end) {
+      while (pc < def.end && !returning) {
         executeLine(lines[pc]);
         pc++;
       }
       pc = savedPc;
+
+      localVarScope.pop_back();
+      localStrScope.pop_back();
+      variables["retval"] = retval;  // readable by the caller as /retval
+
+      returning = savedReturning;
       return;
     }
 
@@ -351,6 +458,87 @@ private:
     term.println("[Module loaded]");
   }
 
+  // CALL "file.o" "function" resultVar [arg1] [arg2] ... - loads a
+  // compiled .o (the same loader runmod uses - real relocations, real
+  // symbol resolution against the firmware whitelist, up to 6 register-
+  // sized arguments) and stores its return value into resultVar. Bridges
+  // Retron to native code for anything the interpreter itself is slow
+  // or awkward at (real arithmetic precision, anything CPU-heavy).
+  // resultVar is written as a plain global (not the caller's local
+  // scope) for the same reason /retval is: it's meant to be read back
+  // immediately after the CALL line, not tied to any function's frame.
+  void executeCall(const String& args) {
+    String a = args;
+    a.trim();
+    if (!a.startsWith("\"")) {
+      term.println("ERROR: Usage: CALL \"file.o\" \"function\" resultVar [args...]");
+      return;
+    }
+
+    int fileEnd = a.indexOf('"', 1);
+    if (fileEnd < 0) {
+      term.println("ERROR: Unterminated file name in CALL");
+      return;
+    }
+    String filePath = resolveScriptPath(a.substring(1, fileEnd));
+
+    String rest = a.substring(fileEnd + 1);
+    rest.trim();
+    if (!rest.startsWith("\"")) {
+      term.println("ERROR: Usage: CALL \"file.o\" \"function\" resultVar [args...]");
+      return;
+    }
+    int funcEnd = rest.indexOf('"', 1);
+    if (funcEnd < 0) {
+      term.println("ERROR: Unterminated function name in CALL");
+      return;
+    }
+    String funcName = rest.substring(1, funcEnd);
+
+    rest = rest.substring(funcEnd + 1);
+    rest.trim();
+
+    std::vector<String> tokens;
+    int p = 0;
+    while (p < (int)rest.length()) {
+      int sp = rest.indexOf(' ', p);
+      String tok = (sp >= 0) ? rest.substring(p, sp) : rest.substring(p);
+      tok.trim();
+      if (tok.length() > 0) tokens.push_back(tok);
+      if (sp < 0) break;
+      p = sp + 1;
+    }
+
+    if (tokens.empty()) {
+      term.println("ERROR: Usage: CALL \"file.o\" \"function\" resultVar [args...]");
+      return;
+    }
+
+    String resultVar = tokens[0];
+    if (resultVar.length() > 0 && resultVar[0] == '/') resultVar = resultVar.substring(1);
+
+    std::vector<uint32_t> callArgs;
+    for (size_t i = 1; i < tokens.size(); i++) {
+      callArgs.push_back((uint32_t)(int32_t)getValue(tokens[i]));
+    }
+
+    ElfModule mod(fs, term);
+    if (!mod.load({filePath}, kRunmodSymbols)) return;  // load() already printed a specific error
+
+    if (!mod.hasFunction(funcName)) {
+      term.println("ERROR: CALL: no such function: " + funcName);
+      return;
+    }
+
+    uint32_t result;
+    if (!mod.call(funcName, callArgs, result)) {
+      term.println("ERROR: CALL: call failed");
+      return;
+    }
+
+    variables[resultVar] = (float)(int32_t)result;
+  }
+
   // Resolves a script-referenced filename against the directory the
   // currently-running script was loaded from, unless it's already
   // absolute - so scripts can reference sibling files by plain name.
@@ -390,7 +578,11 @@ private:
         int end = i + 1;
         while (end < (int)str.length() && (isAlphaNumeric(str[end]) || str[end] == '_')) end++;
         String varName = str.substring(i + 1, end);
-        if (stringVariables.count(varName)) {
+        if (!localVarScope.empty() && localStrScope.back().count(varName)) {
+          result += localStrScope.back()[varName];
+        } else if (!localVarScope.empty() && localVarScope.back().count(varName)) {
+          result += String((int)localVarScope.back()[varName]);
+        } else if (stringVariables.count(varName)) {
           result += stringVariables[varName];
         } else {
           result += String((int)variables[varName]);
@@ -406,9 +598,9 @@ private:
   void executeLoop(int count) {
     int startPc = pc + 1;
     int endPc = findEnd(startPc);
-    for (int i = 0; i < count && !quit; i++) {
+    for (int i = 0; i < count && !quit && !returning; i++) {
       pc = startPc;
-      while (pc < endPc && !quit) {
+      while (pc < endPc && !quit && !returning) {
         executeLine(lines[pc]);
         pc++;
       }
@@ -421,7 +613,7 @@ private:
     if (evalCondition(condition)) {
       int endPc = findEnd(startPc);
       pc = startPc;
-      while (pc < endPc && !quit) {
+      while (pc < endPc && !quit && !returning) {
         String upper = lines[pc];
         upper.toUpperCase();
         if (upper.indexOf("ELSE") >= 0) break;
@@ -437,7 +629,7 @@ private:
         if (upper.indexOf("ELSE") >= 0) {
           pc++;
           int endPc = findEnd(startPc);
-          while (pc < endPc) {
+          while (pc < endPc && !returning) {
             if (lines[pc].indexOf("END") >= 0) break;
             executeLine(lines[pc]);
             pc++;
@@ -464,7 +656,16 @@ private:
       varName = varName.substring(1);
     }
 
-    variables[varName] = evalExpression(expr);
+    float val = evalExpression(expr);
+    // Inside a function call, assignment targets that call's own local
+    // scope (even for a name that also exists globally - shadowing, not
+    // overwriting the global) so recursive/nested calls don't stomp on
+    // each other's variables of the same name.
+    if (!localVarScope.empty()) {
+      localVarScope.back()[varName] = val;
+    } else {
+      variables[varName] = val;
+    }
   }
 
   bool evalCondition(const String& condition) {

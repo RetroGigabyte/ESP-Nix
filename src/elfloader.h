@@ -81,6 +81,7 @@ struct Elf32_Rela {
 #define ELF_R_SYM(info) ((info) >> 8)
 #define ELF_R_TYPE(info) ((info) & 0xff)
 #define R_XTENSA_32 1
+#define R_XTENSA_SLOT0_OP 20
 #define STT_FUNC 2
 #define SHN_UNDEF 0
 
@@ -190,6 +191,10 @@ public:
 
   bool hasFunction(const String& name) {
     return findFunction(name) != nullptr;
+  }
+
+  void* textBase() {
+    return objects.empty() ? nullptr : objects[0].textMem;
   }
 
 private:
@@ -391,17 +396,48 @@ private:
     return false;
   }
 
-  // Applies every R_XTENSA_32 relocation in one (section, .rela.<section>)
-  // pair, writing the resolved 32-bit value into destMem (already holding
-  // that section's raw pre-relocation bytes). gas emits relocations
-  // against local/static symbols targeting the enclosing SECTION symbol
-  // (whose st_value is always 0) rather than the specific symbol, with
-  // the real intra-section offset baked into the placeholder bytes
-  // already at the relocation site - confirmed empirically against this
-  // toolchain's actual output, not just the ELF spec on paper - so both
-  // the placeholder and r_addend are added on top of the resolved base.
+  // Patches a 3-byte Xtensa CALLn instruction's PC-relative offset field
+  // (bits [23:6] of the instruction read as one little-endian 24-bit
+  // value; bits [5:0] are the opcode+n fields and must be preserved).
+  // gas only fills this in directly when it can resolve the callee at
+  // assembly time (a local/static symbol); a call to a symbol with
+  // external/global linkage - even one defined in the very same file,
+  // e.g. one public mbedTLS function calling another - gets a real
+  // R_XTENSA_SLOT0_OP relocation instead, deliberately left as a 0
+  // placeholder for a linker to patch. Confirmed empirically: skipping
+  // these (as an earlier version of this loader did, having only been
+  // tested against static-function-to-static-function calls) leaves the
+  // call targeting 2 bytes past itself, crashing with an
+  // IllegalInstruction the moment it's reached - found while stress-
+  // testing against real mbedTLS source rather than synthetic tests.
+  void patchCall(uint8_t* destMem, uint32_t offset, uint32_t selfAddr, uint32_t targetAddr) {
+    uint32_t word = destMem[offset] | (destMem[offset + 1] << 8) | (destMem[offset + 2] << 16);
+    uint32_t lowBits = word & 0x3F;
+
+    uint32_t base = (selfAddr + 3) & ~((uint32_t)3);
+    int32_t offset18 = ((int32_t)targetAddr - (int32_t)base) >> 2;
+
+    uint32_t newWord = ((uint32_t)offset18 & 0x3FFFF) << 6 | lowBits;
+    destMem[offset] = newWord & 0xFF;
+    destMem[offset + 1] = (newWord >> 8) & 0xFF;
+    destMem[offset + 2] = (newWord >> 16) & 0xFF;
+  }
+
+  // Applies every relocation this loader understands in one (section,
+  // .rela.<section>) pair, writing into destMem (already holding that
+  // section's raw pre-relocation bytes). selfBase is the address destMem
+  // will actually live at once copied to its final home - needed to
+  // compute CALLn's PC-relative offset correctly; R_XTENSA_32 doesn't
+  // need it. gas emits R_XTENSA_32 against local/static symbols
+  // targeting the enclosing SECTION symbol (whose st_value is always 0)
+  // rather than the specific symbol, with the real intra-section offset
+  // baked into the placeholder bytes already at the relocation site -
+  // confirmed empirically against this toolchain's actual output, not
+  // just the ELF spec on paper - so both the placeholder and r_addend
+  // are added on top of the resolved base.
   bool applyRelocaSection(LoadedObject& obj, int relaIdx, uint8_t* destMem, size_t destSize,
-                           const std::map<String, uint32_t>& globalSymbols, const ExportedSymbol* symtab) {
+                           uint32_t selfBase, const std::map<String, uint32_t>& globalSymbols,
+                           const ExportedSymbol* symtab) {
     if (relaIdx < 0 || obj.symtabIdx < 0 || obj.strtabIdx < 0) return true;
 
     const Elf32_Shdr& relaSh = obj.shdrs[relaIdx];
@@ -412,14 +448,49 @@ private:
 
     for (int i = 0; i < relaCount; i++) {
       const Elf32_Rela& rel = relas[i];
-      if (ELF_R_TYPE(rel.r_info) != R_XTENSA_32) continue;
+      int type = ELF_R_TYPE(rel.r_info);
+
+      if (type == R_XTENSA_SLOT0_OP) {
+        if (rel.r_offset + 3 > destSize) continue;
+        uint32_t word = destMem[rel.r_offset] | (destMem[rel.r_offset + 1] << 8) | (destMem[rel.r_offset + 2] << 16);
+        // Only a CALLn instruction (opcode 0101 in bits[3:0]) needs real
+        // target patching - an L32R's SLOT0_OP (opcode 0001) references
+        // a literal pool entry at a fixed, always-local offset already
+        // correctly encoded by gas, needing no patching (proven safe by
+        // every prior test on this branch).
+        if ((word & 0xF) != 0x5) continue;
+
+        const Elf32_Sym& sym = syms[ELF_R_SYM(rel.r_info)];
+        uint32_t resolved;
+        if (!resolveSymbolAddress(obj, sym, strtab, globalSymbols, symtab, resolved)) return false;
+
+        uint32_t targetAddr = resolved + rel.r_addend;
+        uint32_t selfAddr = selfBase + rel.r_offset;
+        patchCall(destMem, rel.r_offset, selfAddr, targetAddr);
+        continue;
+      }
+
+      if (type != R_XTENSA_32) continue;
 
       const Elf32_Sym& sym = syms[ELF_R_SYM(rel.r_info)];
       uint32_t resolved;
       if (!resolveSymbolAddress(obj, sym, strtab, globalSymbols, symtab, resolved)) return false;
 
+      // The placeholder-bytes-carry-the-real-offset quirk only applies
+      // to the local/static-symbol case (gas targets the enclosing
+      // SECTION symbol, whose st_value is always 0, baking the true
+      // offset into the bytes instead). For a genuinely external/
+      // undefined symbol (memcpy, memset, etc.) there's no local offset
+      // to encode there, and the placeholder isn't guaranteed to be
+      // zero - confirmed the hard way: unconditionally adding it here
+      // corrupted an otherwise-correctly-resolved external address once
+      // a file had enough diverse external references (real mbedTLS
+      // source, not the small hand-written tests this was first found
+      // against), producing a bad pointer dereference at runtime.
       uint32_t placeholder = 0;
-      if (rel.r_offset + 4 <= destSize) memcpy(&placeholder, destMem + rel.r_offset, 4);
+      if (sym.st_shndx != SHN_UNDEF && rel.r_offset + 4 <= destSize) {
+        memcpy(&placeholder, destMem + rel.r_offset, 4);
+      }
 
       uint32_t value = resolved + rel.r_addend + placeholder;
       if (rel.r_offset + 4 <= destSize) memcpy(destMem + rel.r_offset, &value, 4);
@@ -439,7 +510,7 @@ private:
     }
     memcpy(textStaging, obj.raw + obj.shdrs[obj.textIdx].sh_offset, obj.shdrs[obj.textIdx].sh_size);
 
-    if (!applyRelocaSection(obj, obj.relaTextIdx, textStaging, obj.textSize, globalSymbols, symtab)) {
+    if (!applyRelocaSection(obj, obj.relaTextIdx, textStaging, obj.textSize, (uint32_t)obj.textMem, globalSymbols, symtab)) {
       free(textStaging);
       return false;
     }
@@ -449,10 +520,10 @@ private:
     for (size_t i = 0; i < obj.textSize / 4; i++) dst[i] = src[i];
     free(textStaging);
 
-    if (obj.rodataMem && !applyRelocaSection(obj, obj.relaRodataIdx, (uint8_t*)obj.rodataMem, obj.rodataSize, globalSymbols, symtab)) {
+    if (obj.rodataMem && !applyRelocaSection(obj, obj.relaRodataIdx, (uint8_t*)obj.rodataMem, obj.rodataSize, (uint32_t)obj.rodataMem, globalSymbols, symtab)) {
       return false;
     }
-    if (obj.dataMem && !applyRelocaSection(obj, obj.relaDataIdx, (uint8_t*)obj.dataMem, obj.dataSize, globalSymbols, symtab)) {
+    if (obj.dataMem && !applyRelocaSection(obj, obj.relaDataIdx, (uint8_t*)obj.dataMem, obj.dataSize, (uint32_t)obj.dataMem, globalSymbols, symtab)) {
       return false;
     }
 
