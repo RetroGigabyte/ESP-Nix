@@ -35,13 +35,24 @@ public:
   }
 
 private:
+  // Chip-aware extension, not just naming preference: matching only the
+  // current chip's own extension means an S3 board can never auto-find
+  // and flash a WROOM-32E-targeted image (or vice versa) just because a
+  // stray .esp_update file happened to be sitting on it - the wrong-chip
+  // file simply doesn't match and gets skipped.
+  String updateExtension() {
+    String chipModel = String(ESP.getChipModel());
+    return chipModel.indexOf("S3") >= 0 ? ".esp_s3_update" : ".esp_update";
+  }
+
   String findUpdateFile(FileSystem& fs, const String& dir) {
     if (!fs.exists(dir) || !fs.isDir(dir)) return "";
 
+    String ext = updateExtension();
     for (const auto& name : fs.listDir(dir)) {
       String lower = name;
       lower.toLowerCase();
-      if (lower.endsWith(".esp_update")) {
+      if (lower.endsWith(ext)) {
         String full = dir;
         if (!full.endsWith("/")) full += "/";
         return full + name;
@@ -57,7 +68,23 @@ private:
   // smaller is almost certainly a truncated download or the wrong file
   static const size_t MIN_FIRMWARE_SIZE = 64 * 1024;
 
+  // Checked here, not just in findUpdateFile()'s auto-search, so an
+  // explicit `update <path>` can't bypass the chip-compatibility check by
+  // pointing directly at a wrong-chip file.
+  bool isCompatible(const String& path) {
+    String lower = path;
+    lower.toLowerCase();
+    return lower.endsWith(updateExtension());
+  }
+
   bool flashFrom(FileSystem& fs, Terminal& term, const String& path) {
+    if (!isCompatible(path)) {
+      term.println("Refusing to flash " + path + ": wrong device type.");
+      term.println("This is a " + updateExtension() + "-only board (DEVICE_TYPE=" +
+                    (updateExtension() == ".esp_s3_update" ? "s3" : "classic") + ").");
+      return false;
+    }
+
     File file = fs.openRaw(path);
     if (!file) {
       term.println("Failed to open " + path);

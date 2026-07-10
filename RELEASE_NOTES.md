@@ -1,10 +1,39 @@
-# ESP-Nix v1.3
+# ESP-Nix v1.3.5
 
 A declarative, Unix-like shell operating system for the ESP32 — built from scratch on FreeRTOS, running entirely off an I2C LCD and a serial console (with optional SD card, PS/2 keyboard, and WiFi).
 
 > **AI Disclaimer:** This project was developed with the assistance of Claude AI. I believe AI-written code should be open source to benefit everyone and maintain transparency.
 
 > **Upgrading from v0.8.1 or earlier? You must reflash over USB, not `update`.** v0.8.0/v0.8.1 shipped with a partition scheme (`huge_app.csv`) that turned out to break `update`/OTA entirely — see "Partition Layout Fix" below. This release corrects that with a new partition table, which again means a one-time USB-only migration (`pio run -t upload`). Every release after this one goes back to normal `update`/OTA. This also resets everything on internal storage (WiFi credentials, `/etc/settings`, `/boot` scripts, history) — the SD card is untouched.
+
+> **ESP32-S3 support is here!: source is here, but no pre-built firmware yet.** This release adds a second build target (`main-s3`) for ESP32-S3 boards, as part of ongoing multi-chip work (see `goals.md`). The source compiles and runs — the S3-specific fixes in this release (LCD/PS2 conditionally compiled out where the pins don't carry over, PSRAM detection, `web`/OTA working without an SD card) all came out of getting a real S3 board fully booted. There's no pre-built S3 firmware or OTA update path published yet, since there's no prior public S3 release to update *from* — build it yourself with `pio run -e main-s3 -t upload` if you want to try it on S3 hardware. The classic ESP32/WROOM-32E build remains the one to use otherwise.
+>
+> ```
+> root@esp-nix:/$ nixfetch
+>    .--.          root@esp-nix
+>   |o_o |         ------------
+>   |:_/ |         OS: ESP-Nix 1.3.5
+>  //   \ \        Host: ESP32-S3
+> (|     | )       Kernel: FreeRTOS
+> /'\_   _/`\      Uptime: 0m
+> \___)=(___/      Shell: /bin/nix
+>                  CPU: Xtensa LX7 @ 240MHz (2 cores)
+>                  Memory: 50KB / 339KB
+>                  PSRAM: 0KB / 8189KB
+>                  Disk (/): 1276KB / 3456KB
+> ```
+
+## New in v1.3.5: `web`/OTA no longer require an SD card
+
+`web` (the WiFi file server + browser terminal) previously refused to start at all without an SD card mounted, and its file serving/upload/download code talked to `SD_MMC` directly rather than through the existing `FileSystem` abstraction the rest of the shell already uses. Rewritten to go through `FileSystem` throughout, so `web` now works on LittleFS alone — page templates, file listing, download (including the on-the-fly zip-a-folder path), delete, and upload all route through the same storage abstraction as everything else, with SD still used transparently when it's present.
+
+Also added: upload completeness validation. A dropped WiFi connection mid-upload previously left a silently truncated file behind, which `update` would only catch much later with a cryptic flash-image error. The upload handler now tracks bytes actually written against the expected total and (a) handles the previously-unhandled `UPLOAD_FILE_ABORTED` status so a dropped connection properly closes its file handle, and (b) deletes and reports any incomplete upload immediately, rather than leaving a corrupt file for a later `update` to trip over.
+
+## New in v1.3.5: chip-aware OTA update files, `DEVICE_TYPE` variable
+
+`update` now only accepts a firmware file whose extension matches the chip it's actually running on — plain `.esp_update` on classic ESP32/WROOM-32E-family boards, `.esp_s3_update` on ESP32-S3 boards. This applies both to `update`'s auto-search (`/sd` then `/`) and to an explicit `update <path>` — a mismatched file is refused with a clear message rather than silently attempting to flash incompatible firmware. A new `DEVICE_TYPE` shell variable (`classic` or `s3`) reflects which family the running chip belongs to, set automatically at boot from `ESP.getChipModel()` rather than hardcoded.
+
+`nixfetch`'s `Host`/`CPU` lines are also now detected at runtime instead of hardcoded to `ESP32 WROOM32E`/`Xtensa LX6` - and a `PSRAM` line is shown when the running chip actually has PSRAM (skipped entirely on boards without it, like WROOM-32E).
 
 ## Shell
 - Full command set: `ls` (with `-l`), `cd`, `cat`, `cp`/`mv` (recursive, glob-aware, directory-destination-aware), `rm -r`, `grep`, `head`, `tail`, `find`, `wc`, `du`, `mkdir`, `touch`, `echo`, and more

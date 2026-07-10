@@ -1,6 +1,14 @@
 #include <Arduino.h>
+// LCD only wired up on the classic-ESP32 (WROOM-32E) build - the S3
+// board this shared main.cpp also targets has no LCD attached, and
+// GPIO22 (the LCD's I2C SCL pin below) isn't even a valid pin on the S3.
+// CONFIG_IDF_TARGET_ESP32S3 is defined automatically by the toolchain
+// when compiling for the S3, so this stays correct for both build
+// targets without needing a separate main.cpp per chip.
+#ifndef CONFIG_IDF_TARGET_ESP32S3
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#endif
 
 #include "filesystem.h"
 #include "terminal.h"
@@ -11,9 +19,13 @@
 #include "input.h"
 
 // PS/2 keyboard pins - free GPIOs that don't conflict with the LCD (21/22)
-// or the SD card's SD_MMC pins (2, 4, 12, 13, 14, 15)
+// or the SD card's SD_MMC pins (2, 4, 12, 13, 14, 15) - on the classic
+// ESP32/WROOM-32E specifically. Also gated out on the S3 build: GPIO26 is
+// reserved for the S3's own SPI flash, not a general-purpose pin there.
+#ifndef CONFIG_IDF_TARGET_ESP32S3
 #define PS2_CLOCK_PIN 26
 #define PS2_DATA_PIN 25
+#endif
 
 // Overrides the Arduino core's weak default (8192) - the shell's command
 // dispatch nests deeply (pipeline -> command -> library calls), and some
@@ -25,12 +37,20 @@ size_t getArduinoLoopTaskStackSize(void) {
 }
 
 // Global objects
+#ifndef CONFIG_IDF_TARGET_ESP32S3
 LiquidCrystal_I2C lcd(0x27, 16, 2);
+#endif
 FileSystem fsys;
+#ifndef CONFIG_IDF_TARGET_ESP32S3
 Terminal term(&lcd);
+#else
+Terminal term(nullptr);
+#endif
 Variables vars;
 Shell shell(fsys, term, vars);
+#ifndef CONFIG_IDF_TARGET_ESP32S3
 PS2Keyboard ps2kb;
+#endif
 
 void setup() {
   Serial.begin(115200);
@@ -38,8 +58,12 @@ void setup() {
 
   Serial.println("\nESP-Nix Boot Sequence Starting...\n");
 
-  // Initialize LCD
+  // LCD only initialized on the classic-ESP32 build - see the #ifndef
+  // above. Wire.begin(21, 22) is the LCD's I2C pins (WROOM-32E-specific;
+  // GPIO22 isn't valid on the S3 at all).
+#ifndef CONFIG_IDF_TARGET_ESP32S3
   Wire.begin(21, 22);
+#endif
   term.init();
   term.println("ESP-Nix: Initializing");
 
@@ -57,10 +81,14 @@ void setup() {
   term.println(fsys.sdAvailable() ? "SD Card: OK" : "SD Card: none");
   delay(500);
 
-  // PS/2 keyboard is optional - Serial input still works either way
+  // PS/2 keyboard only initialized on the classic-ESP32 build - see the
+  // #ifndef above (GPIO26 is reserved for the S3's own SPI flash there).
+  // Serial input still works fine without this on the S3.
+#ifndef CONFIG_IDF_TARGET_ESP32S3
   ps2kb.begin(PS2_CLOCK_PIN, PS2_DATA_PIN);
   input.attachPS2(&ps2kb);
   term.println("PS/2 Keyboard: Ready");
+#endif
   delay(500);
 
   // Create some demo files if they don't exist
@@ -167,6 +195,11 @@ void setup() {
   vars.set("USER", "root");
   vars.set("HOME", "/");
   vars.set("SHELL", "/bin/nix");
+  // Chip family, not the exact model - same "S3" substring check nixfetch
+  // already uses. Read by OtaUpdater to only ever flash matching-chip
+  // update files (see otaupdate.h) - not meant to be overridden by
+  // esp-nix.conf like the vars above, since it reflects real hardware.
+  vars.set("DEVICE_TYPE", String(ESP.getChipModel()).indexOf("S3") >= 0 ? "s3" : "classic");
 
   // Link variables to commands
   shell.setVariables(&vars);

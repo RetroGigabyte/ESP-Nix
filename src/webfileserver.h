@@ -3,7 +3,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
-#include <SD_MMC.h>
 #include <functional>
 #include "terminal.h"
 #include "input.h"
@@ -20,8 +19,21 @@
 // need to include commands.h (which includes this file) - avoids a
 // circular include.
 //
-// Page templates (the file manager and terminal UI) live as real files on
-// the SD card under /www, not as C++ string literals in firmware - keeps
+// Storage is accessed through FileSystem (fs), not SD_MMC directly -
+// previously this went straight to SD_MMC everywhere, which meant a board
+// with no local SD (e.g. a multi-chip-build S3 acting as MAIN, which per
+// the architecture has no SD of its own - only WROOM-32E does) couldn't
+// run the web server at all. FileSystem already transparently routes
+// between LittleFS and local SD via the "/sd" path prefix, so going
+// through it means this server now works on LittleFS alone. A future
+// remote-SD relay to WROOM-32E (once that link actually exists in
+// hardware/code) would plug in as another FileSystem backend behind that
+// same routing, not as a change to this file - see the note in
+// filesystem.h's backend() method.
+//
+// Page templates (the file manager and terminal UI) live as real files
+// under /www on whichever storage FileSystem resolves to (SD if mounted,
+// LittleFS otherwise), not as C++ string literals in firmware - keeps
 // them editable without reflashing, and keeps flash usage down as more
 // pages get added over time. Defaults are written on first use if missing.
 class WebFileServer {
@@ -33,7 +45,7 @@ public:
   void run(FileSystem& fs, Terminal& term, const String& ssid, const String& password,
            CommandExecutor executeCmd, CwdGetter getCwd, const String& nixfetchOutput,
            const String& hostname) {
-    ensureDefaultPages();
+    ensureDefaultPages(fs);
 
     WebServer server(80);
     setupRoutes(fs, term, server, executeCmd, getCwd, nixfetchOutput);
@@ -86,7 +98,7 @@ public:
       return;
     }
 
-    ensureDefaultPages();
+    ensureDefaultPages(fs);
 
     WebServer server(80);
     setupRoutes(fs, term, server, executeCmd, getCwd, nixfetchOutput);
@@ -169,52 +181,55 @@ private:
     return out;
   }
 
-  // Reads a page template from the SD card, falling back to a built-in
-  // default if the card or file isn't there for some reason.
-  static String loadPage(const char* path, const String& fallback) {
-    if (SD_MMC.exists(path)) {
-      File f = SD_MMC.open(path, FILE_READ);
-      if (f) {
-        String content = "";
-        while (f.available()) content += (char)f.read();
-        f.close();
-        if (content.length() > 0) return content;
-      }
+  // Reads a page template from storage (SD if mounted, LittleFS
+  // otherwise - see FileSystem), falling back to a built-in default if
+  // the file isn't there for some reason.
+  static String loadPage(FileSystem& fs, const char* path, const String& fallback) {
+    if (fs.exists(path)) {
+      String content = fs.readFile(path);
+      if (content.length() > 0) return content;
     }
     return fallback;
   }
 
-  static void writeIfMissing(const char* path, const String& content) {
-    if (SD_MMC.exists(path)) return;
-    if (!SD_MMC.exists("/www")) SD_MMC.mkdir("/www");
-    File f = SD_MMC.open(path, FILE_WRITE);
-    if (f) {
-      f.print(content);
-      f.close();
-    }
+  static void writeIfMissing(FileSystem& fs, const char* path, const String& content) {
+    if (fs.exists(path)) return;
+    if (!fs.exists("/www")) fs.createDir("/www");
+    fs.writeFile(path, content);
   }
 
-  static void ensureDefaultPages() {
-    writeIfMissing("/www/index.html", defaultIndexPage());
-    writeIfMissing("/www/shell.html", defaultShellPage());
+  static void ensureDefaultPages(FileSystem& fs) {
+    writeIfMissing(fs, "/www/index.html", defaultIndexPage());
+    writeIfMissing(fs, "/www/shell.html", defaultShellPage());
   }
 
   // Directories get a "(folder, zipped on download)" label and route
   // through the same zip-on-the-fly logic as the /download handler.
   static String listFilesHTML(FileSystem& fs) {
-    String html = "<h2>Files on SD Card</h2><ul>";
-    File root = SD_MMC.open("/");
-    if (!root) return html + "<li>(failed to open root)</li></ul>";
+    String label = fs.sdAvailable() ? "SD Card" : "Storage";
+    String html = "<h2>Files on " + label + "</h2><ul>";
 
-    File file = root.openNextFile();
-    while (file) {
-      String fname = String(file.name());
-      bool isDir = file.isDirectory();
-      html += "<li>" + fname + (isDir ? " (folder, zipped on download) " : " (" + String(file.size()) + " bytes) ");
+    std::vector<String> names = fs.listDir("/");
+    if (names.empty()) return html + "<li>(empty)</li></ul>";
+
+    for (const String& fname : names) {
+      String fullPath = "/" + fname;
+      bool isDir = fs.isDir(fullPath);
+      String sizeLabel;
+      if (isDir) {
+        sizeLabel = " (folder, zipped on download) ";
+      } else {
+        // .size() on the raw handle, not readFile() - a multi-MB firmware
+        // image shouldn't get fully loaded into RAM just to print its size.
+        File f = fs.openRaw(fullPath);
+        size_t bytes = f ? f.size() : 0;
+        if (f) f.close();
+        sizeLabel = " (" + String(bytes) + " bytes) ";
+      }
+      html += "<li>" + fname + sizeLabel;
       html += "<a href='/download?file=" + fname + "'>Download</a> ";
       html += "<a href='/delete?file=" + fname + "' onclick=\"return confirm('Delete " + fname + "?');\">Delete</a>";
       html += "</li>";
-      file = root.openNextFile();
     }
     html += "</ul>";
     return html;
@@ -288,14 +303,14 @@ private:
   static void setupRoutes(FileSystem& fs, Terminal& term, WebServer& server, CommandExecutor& executeCmd,
                            CwdGetter& getCwd, const String& nixfetchOutput) {
     server.on("/", HTTP_GET, [&server, &fs, &nixfetchOutput]() {
-      String page = loadPage("/www/index.html", defaultIndexPage());
+      String page = loadPage(fs, "/www/index.html", defaultIndexPage());
       page.replace("{{FILES}}", listFilesHTML(fs));
       page.replace("{{NIXFETCH}}", htmlEscape(nixfetchOutput));
       server.send(200, "text/html", page);
     });
 
-    server.on("/shell", HTTP_GET, [&server]() {
-      server.send(200, "text/html", loadPage("/www/shell.html", defaultShellPage()));
+    server.on("/shell", HTTP_GET, [&server, &fs]() {
+      server.send(200, "text/html", loadPage(fs, "/www/shell.html", defaultShellPage()));
     });
 
     server.on("/pwd", HTTP_GET, [&server, &getCwd]() {
@@ -325,7 +340,7 @@ private:
           return;
         }
 
-        File zipFile = SD_MMC.open(tmpZip, FILE_READ);
+        File zipFile = fs.openRaw(tmpZip, FILE_READ);
         if (!zipFile) { server.send(500, "text/plain", "Failed to open zip"); return; }
 
         int lastSlash = filename.lastIndexOf('/');
@@ -333,11 +348,11 @@ private:
         server.sendHeader("Content-Disposition", "attachment; filename=\"" + shortName + ".zip\"");
         server.streamFile(zipFile, "application/zip");
         zipFile.close();
-        SD_MMC.remove(tmpZip);
+        fs.deleteFile(tmpZip);
         return;
       }
 
-      File file = SD_MMC.open(filename, FILE_READ);
+      File file = fs.openRaw(filename, FILE_READ);
       if (!file) { server.send(404, "text/plain", "File not found: " + filename); return; }
 
       int lastSlash = filename.lastIndexOf('/');
@@ -347,29 +362,64 @@ private:
       file.close();
     });
 
-    server.on("/delete", HTTP_GET, [&server]() {
+    server.on("/delete", HTTP_GET, [&server, &fs]() {
       if (!server.hasArg("file")) { server.send(400, "text/plain", "Missing file parameter"); return; }
       String filename = sanitizeFilename(server.arg("file"));
-      if (SD_MMC.exists(filename)) SD_MMC.remove(filename);
+      if (fs.exists(filename)) fs.deleteFile(filename);
       server.sendHeader("Location", "/");
       server.send(303);
     });
 
     static File uploadFile;
+    static String uploadPath;
+    static size_t uploadWritten;
     server.on(
       "/upload", HTTP_POST,
-      [&server]() { server.send(200); },
-      [&server]() {
+      // Runs after the upload handler below has already fully processed
+      // the multipart body, so uploadWritten/upload.totalSize are final
+      // here - this is where an incomplete transfer (e.g. WiFi dropout
+      // mid-upload of a large firmware image) gets caught and reported,
+      // instead of silently leaving a truncated file for a later
+      // `update` to fail on with a much more confusing error.
+      [&server, &fs]() {
+        HTTPUpload& upload = server.upload();
+        // Defensive close - normally already closed by UPLOAD_FILE_END/
+        // UPLOAD_FILE_ABORTED below, but closing an already-closed File
+        // is a harmless no-op, whereas deleteFile() on a still-open FD
+        // fails outright (LittleFS: "Has open FD") - this is what a
+        // dropped connection that never reaches either status would hit.
+        if (uploadFile) uploadFile.close();
+
+        if (uploadWritten != upload.totalSize) {
+          fs.deleteFile(uploadPath);
+          server.send(500, "text/plain",
+            "Upload incomplete: got " + String(uploadWritten) + " of " +
+            String(upload.totalSize) + " bytes (connection dropped?) - " +
+            "deleted the partial file, please retry.");
+          return;
+        }
+        server.send(200);
+      },
+      [&server, &fs]() {
         HTTPUpload& upload = server.upload();
         if (upload.status == UPLOAD_FILE_START) {
-          String filename = sanitizeFilename(upload.filename);
-          uploadFile = SD_MMC.open(filename, FILE_WRITE);
+          uploadPath = sanitizeFilename(upload.filename);
+          uploadFile = fs.openRaw(uploadPath, FILE_WRITE);
+          uploadWritten = 0;
         } else if (upload.status == UPLOAD_FILE_WRITE) {
-          if (uploadFile) uploadFile.write(upload.buf, upload.currentSize);
+          if (uploadFile) {
+            size_t n = uploadFile.write(upload.buf, upload.currentSize);
+            uploadWritten += n;
+          }
         } else if (upload.status == UPLOAD_FILE_END) {
           if (uploadFile) uploadFile.close();
           server.sendHeader("Location", "/");
           server.send(303);
+        } else if (upload.status == UPLOAD_FILE_ABORTED) {
+          // Previously unhandled - meant a dropped connection left the
+          // file open, which is exactly what caused the LittleFS
+          // "Has open FD" unlink failure this fix addresses.
+          if (uploadFile) uploadFile.close();
         }
       });
   }

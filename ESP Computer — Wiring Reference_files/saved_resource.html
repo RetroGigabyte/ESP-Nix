@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<!-- saved from url=(0253)https://b5a8d087-3769-4462-a394-99ae981b4abd.frame.claudeusercontent.com/_f/1783397366-343d/?__frame_t=WO1FmlcF5YB2f7Tsr0JTi1sw.7b7ef7a7-c48d-48fd-8102-a2b6fda19525.0099e1de-ed7e-4d02-949b-5eac4f8516d0.1783400991&__frame_v=manifest.bd9446110d1c7761.json -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><!-- frame-runtime --><!--<base href="/_f/1783397366-343d/">--><base href="."><script>window.__FRAME_PREAMBLE={"capabilities":{"mcp":"mcp.BQqQVVN_.js"},"transforms":"_transforms.DYk1Ltlh.js"}</script><script>(function(){"use strict";const X="modulepreload",Y=function(e){return"/"+e},Z={},U=function(t,n,u){let o=Promise.resolve();function i(f){const a=new Event("vite:preloadError",{cancelable:!0});if(a.payload=f,window.dispatchEvent(a),!a.defaultPrevented)throw f}return o.then(f=>{for(const a of f||[])a.status==="rejected"&&i(a.reason);return t().catch(i)})},D=["light","dark","system"];function $(e){if(e==null||typeof e!="object")return!1;const t=e.__frame_init;return t!=null&&typeof t=="object"}function q(e){if(e==null||typeof e!="object")return!1;const t=e.__frame_theme;if(t==null||typeof t!="object")return!1;const n=t.theme;return typeof n=="string"&&D.includes(n)}function M(e){if(window===top||e.type==="auxclick"&&e.button!==1)return;const t=e.composedPath?e.composedPath():[e.target];let n=null;for(let f=0;f<t.length;f++){const a=t[f];if(a&&a.matches&&a.matches("a[href],area[href]")){n=a;break}}if(!n&&e.target&&e.target.closest&&(n=e.target.closest("a[href],area[href]")),!n)return;const u=n.getAttribute("href");if(!u)return;let o,i;try{o=new URL(u,document.baseURI),i=new URL(document.baseURI).origin}catch{return}(o.protocol==="http:"||o.protocol==="https:")&&o.origin!==i&&(e.preventDefault(),parent.postMessage({__frame_nav:!0,url:o.href},"*"))}const L={};function y(e){if(window===top)return;const t=Date.now();t-(L[e]||0)<500||(L[e]=t,parent.postMessage({__frame_engaged:!0,kind:e},"*"))}const F=2e3,T=["wheel","touchstart","touchmove","keydown","pointerdown"];let k=0;function B(e){e.isTrusted&&(k=Date.now())}function z(){addEventListener("click",M,!0),addEventListener("auxclick",M,!0)}function W(){for(let e=0;e<T.length;e++)addEventListener(T[e],B,{capture:!0,passive:!0});addEventListener("scroll",e=>{e.isTrusted&&Date.now()-k<F&&y("scroll")},{capture:!0,passive:!0}),addEventListener("pointermove",e=>{e.isTrusted&&y("pointer")},{capture:!0,passive:!0}),addEventListener("click",e=>{e.isTrusted&&y("click")},{capture:!0,passive:!0})}function x(e,t,n){const u=[...t.values()].filter(o=>o.targets.some(i=>i.startsWith(e+".")));return{wrap(o,i){const f=`${e}.${o}`,a=u.filter(s=>s.targets.includes(f));return a.length===0?(...s)=>{try{return i(...s)}catch(d){return Promise.reject(d)}}:(...s)=>{let d=s;for(const c of a){const l=c.module.parameters;if(l)try{d=l(d)}catch{return Promise.reject({code:"transform_error",id:c.id,scope:e,message:"parameters transform failed"})}}let m;try{m=i(...d)}catch(c){m=Promise.reject(c)}return m.then(c=>{for(let l=a.length-1;l>=0;l--){const h=a[l],p=h.module.returns;if(p)try{c=p(c)}catch{return n({id:h.id,scope:e,leg:"returns"}),c}}return c},c=>{for(let l=a.length-1;l>=0;l--){const h=a[l],p=h.module.throws;if(p)try{c=p(c)}catch{return n({id:h.id,scope:e,leg:"throws"}),Promise.reject(c)}}return Promise.reject(c)})}}}}function H(e,t,n,u=()=>{}){const o=new Set(e.changes??[]),i=new Map;for(const f of o){const a=t[f];a&&i.set(f,a)}return{contract:e.contract,changes:o,flags:new Set(e.flags??[]),capabilities:e.capabilities??{},transforms:i,shellOrigin:n.shellOrigin,mount:n.mount,pipe:f=>x(f,i,u)}}(function(){const e=Object.defineProperty,t=globalThis,n=["RTCPeerConnection","webkitRTCPeerConnection","RTCDataChannel","RTCIceCandidate","RTCSessionDescription","RTCRtpSender","RTCRtpReceiver"];let u=0;for(let o=0;o<n.length;o++){const i=n[o];try{e(t,i,{value:void 0,writable:!1,configurable:!1})}catch{try{delete t[i]}catch{}try{e(t,i,{value:void 0,writable:!1,configurable:!0})}catch{}}typeof t[i]=="function"&&u++}if(u&&window!==top)try{parent.postMessage({__frame_rtc_lockdown_failed:u},"*")}catch{}})();const K=1e4,G=Object.freeze([...window.__FRAME_PREAMBLE?.origins??["https://claude.ai","https://preview.claude.ai"]]);function J(e){for(const t of G)if(t.endsWith(":*"))try{const n=new URL(e);if(`${n.protocol}//${n.hostname}:*`===t)return!0}catch{}else if(e===t)return!0;return!1}const w=Object.freeze({...window.__FRAME_PREAMBLE?.capabilities??{}}),E=window.__FRAME_PREAMBLE?.transforms,C=/^[\w.-]+\.js$/,V=/^[a-z][a-z0-9_-]{0,63}$/;let A=null,g=null;function P(e,t,n){try{Object.defineProperty(e,t,{value:n,writable:!1,configurable:!1,enumerable:!0})}catch{try{Object.defineProperty(e,t,{value:n,writable:!1,configurable:!0,enumerable:!0})}catch{}}}let R=!1;function N(e){const t=document.documentElement;e==="light"||e==="dark"?(t.dataset.theme=e,t.style.colorScheme=e,R=!0):R&&(delete t.dataset.theme,t.style.colorScheme="",R=!1)}const _=new Map;function Q(e,t){const n=_.get(e);if(!n)return;Object.assign(n.impl,t),n.impl.__settled=()=>Promise.reject({code:"capability_removed",message:`${e}: method not in this runtime`});const u=n.queue;n.queue=[];for(const o of u){const i=t[o.method];i?i(...o.args).then(o.resolve,o.reject):o.reject({code:"capability_removed",message:`${e}.${o.method} is not in this runtime`})}}function O(e,t){const n=_.get(e);if(!n)return;n.impl.__settled=()=>Promise.reject(t);const u=n.queue;n.queue=[];for(const o of u)o.reject(t)}const j=Object.getOwnPropertyDescriptor(window,"claude");if(window!==top&&!(j&&j.writable===!1)){z(),W();const e=j?.value??{};P(window,"claude",e);const t=s=>{const d={impl:Object.create(null),queue:[]};_.set(s,d);const m=new Proxy(d.impl,{get:(c,l)=>{if(typeof l=="string"&&!(l==="then"||l==="toJSON"||l==="valueOf"))return l==="toString"?Object.prototype.toString:(...h)=>{const p=c[l]??c.__settled;return p?p(...h):new Promise((b,S)=>{d.queue.push({method:l,args:h,resolve:b,reject:S})})}},set:()=>!1});P(e,s,m)};for(const s of Object.keys(w)){if(e[s]!==void 0){P(e,s,e[s]);continue}t(s)}let n=null,u=null,o=0;const i=s=>{s.source!==parent||!J(s.origin)||$(s.data)&&(n=s.data.__frame_init,g=s.origin,removeEventListener("message",i),clearTimeout(o),u?.())};addEventListener("message",i),parent.postMessage({__frame_connect:!0},"*");const f=new Promise(s=>{u=s,o=setTimeout(()=>{removeEventListener("message",i),s()},K)}),a=document.readyState==="loading"?new Promise(s=>document.addEventListener("DOMContentLoaded",()=>s(),{once:!0})):Promise.resolve();f.then(async()=>{if(!n||!g){for(const r of _.keys())O(r,{code:"not_granted",message:"frame initialization did not arrive - capability unavailable"});return}N(n.theme);const s=g;addEventListener("message",r=>{r.source!==parent||r.origin!==s||q(r.data)&&N(r.data.__frame_theme.theme)});const d=r=>U(()=>import("/_runtime/"+r),void 0),m=Object.keys(n.capabilities??{});for(const r of m)Object.hasOwn(w,r)||V.test(r)&&e[r]===void 0&&(t(r),O(r,{code:"capability_disabled",message:"capability not in this runtime generation"}));const c=m.filter(r=>Object.hasOwn(w,r)).map(r=>[r,w[r]]).filter(r=>typeof r[1]=="string"&&C.test(r[1])),[l,...h]=await Promise.allSettled([E&&C.test(E)?d(E):Promise.resolve({}),...c.map(([,r])=>d(r))]),p=g;A=H(n,l.status==="fulfilled"&&l.value?.TRANSFORMS||{},{shellOrigin:p,mount:Q},r=>parent.postMessage({__frame_cap_telemetry:r},p));const b=r=>parent.postMessage({__frame_cap_telemetry:{kind:"cap-load-error",cap:r}},p),S=A;h.forEach((r,v)=>{const I=c[v][0];if(r.status!=="fulfilled"){b(I);return}try{r.value?.install?.(S)}catch{b(I)}});for(const[r,v]of _)v.queue.length===0&&Object.keys(v.impl).length>0||O(r,{code:m.includes(r)?"capability_disabled":"not_granted",message:"capability not available in this session"});await a,parent.postMessage({__frame_ready:!0},g)})}})();</script><!-- /frame-runtime --><meta name="viewport" content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}</style></head><body>
+<title>ESP Computer — Wiring Reference</title>
+<style>
+  :root {
+    --bg: #0b0f1a;
+    --panel: #121a2b;
+    --panel-line: #24304a;
+    --text: #e7ecf3;
+    --text-dim: #93a1b8;
+    --text-faint: #5c6a83;
+    --data: #5fd4c4;
+    --data-dim: #3a5f5a;
+    --power: #e8a23d;
+    --ground: #7c8aa3;
+    --video: #d97757;
+    --board-main: #3a6ea8;
+    --board-cpu: #3a6ea8;
+    --board-gpu: #a86b3a;
+    --board-wrom: #7a3a6e;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  :root[data-theme="light"] {
+    --bg: #f3f1ea;
+    --panel: #ffffff;
+    --panel-line: #dcd6c8;
+    --text: #24211b;
+    --text-dim: #635c4d;
+    --text-faint: #9a9382;
+    --data: #1f8f7c;
+    --data-dim: #bfe3dc;
+    --power: #b5760f;
+    --ground: #8a8370;
+    --video: #b8492f;
+    --board-main: #2f5f8f;
+    --board-cpu: #2f5f8f;
+    --board-gpu: #91622f;
+    --board-wrom: #6b2f5f;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f3f1ea;
+      --panel: #ffffff;
+      --panel-line: #dcd6c8;
+      --text: #24211b;
+      --text-dim: #635c4d;
+      --text-faint: #9a9382;
+      --data: #1f8f7c;
+      --data-dim: #bfe3dc;
+      --power: #b5760f;
+      --ground: #8a8370;
+      --video: #b8492f;
+      --board-main: #2f5f8f;
+      --board-cpu: #2f5f8f;
+      --board-gpu: #91622f;
+      --board-wrom: #6b2f5f;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    margin: 0;
+    padding: 2.5rem 1.5rem 4rem;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+
+  header { margin-bottom: 2rem; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--data);
+    margin: 0 0 0.6rem;
+  }
+  h1 {
+    font-size: clamp(1.6rem, 3vw, 2.2rem);
+    margin: 0 0 0.5rem;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+  .sub {
+    color: var(--text-dim);
+    max-width: 62ch;
+    font-size: 0.98rem;
+  }
+
+  .callout {
+    background: var(--panel);
+    border: 1px solid var(--panel-line);
+    border-left: 3px solid var(--power);
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    margin: 1.5rem 0 2.2rem;
+    font-size: 0.92rem;
+    color: var(--text-dim);
+  }
+  .callout strong { color: var(--text); }
+
+  .diagram-frame {
+    background: var(--panel);
+    border: 1px solid var(--panel-line);
+    border-radius: 10px;
+    padding: 1rem;
+    overflow-x: auto;
+    margin-bottom: 1.2rem;
+  }
+  svg { display: block; min-width: 900px; }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.4rem;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    margin: 0 0 2.6rem;
+    padding: 0.8rem 1rem;
+    background: var(--panel);
+    border: 1px solid var(--panel-line);
+    border-radius: 8px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 0.5rem; white-space: nowrap; }
+  .swatch { width: 22px; height: 3px; border-radius: 2px; flex-shrink: 0; }
+  .swatch.dash { background: none; border-top: 3px dashed var(--power); height: 0; }
+  .swatch.dot { background: none; border-top: 3px dotted var(--ground); height: 0; }
+  .swatch.dashdot { background: none; border-top: 3px dashed var(--video); height: 0; }
+
+  h2 {
+    font-size: 1.15rem;
+    margin: 2.6rem 0 0.9rem;
+    letter-spacing: -0.01em;
+  }
+
+  .table-scroll { overflow-x: auto; border: 1px solid var(--panel-line); border-radius: 8px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--panel);
+    font-size: 0.88rem;
+    min-width: 720px;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.65rem 0.9rem;
+    border-bottom: 1px solid var(--panel-line);
+    vertical-align: top;
+  }
+  th {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    font-weight: 600;
+  }
+  td.link { font-family: var(--mono); font-size: 0.86rem; color: var(--text); white-space: nowrap; }
+  td.spec { font-variant-numeric: tabular-nums; color: var(--text-dim); }
+  tr:last-child td { border-bottom: none; }
+
+  .tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    letter-spacing: 0.03em;
+  }
+  .tag.data { background: var(--data-dim); color: var(--data); }
+  .tag.power { background: color-mix(in srgb, var(--power) 20%, transparent); color: var(--power); }
+  .tag.ground { background: color-mix(in srgb, var(--ground) 20%, transparent); color: var(--ground); }
+  .tag.video { background: color-mix(in srgb, var(--video) 20%, transparent); color: var(--video); }
+
+  .pin-note {
+    margin-top: 2.6rem;
+    padding: 1.1rem 1.2rem;
+    background: var(--panel);
+    border: 1px solid var(--panel-line);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    color: var(--text-dim);
+  }
+  .pin-note h3 { margin: 0 0 0.5rem; font-size: 0.95rem; color: var(--text); }
+  .pin-note ul { margin: 0.4rem 0 0; padding-left: 1.2rem; }
+  .pin-note li { margin-bottom: 0.3rem; }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--panel-line);
+    font-size: 0.8rem;
+    color: var(--text-faint);
+    font-family: var(--mono);
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">ESP-Nix · ESP Computer</p>
+    <h1>Wiring reference — 4 chips, one machine</h1>
+    <p class="sub">Bus-level connections for the three ESP32-S3 boards (MAIN, CPU, GPU) and the ESP32 WROOM-32E, as resolved in <code>goals.md</code>. This is the wiring plan, not a pinout — see the note at the bottom before touching a breadboard.</p>
+  </header>
+
+  <div class="callout">
+    <strong>Exact GPIO numbers aren't fixed here on purpose.</strong> The ESP32-S3 and WROOM-32E route almost any peripheral to almost any pin through their GPIO matrix — the real constraint is avoiding each board's strapping pins and the pins reserved for its own flash/PSRAM, which you confirm against that specific board's datasheet once it's in hand. What's fixed below is which boards talk over which <em>kind</em> of bus, how many wires that implies, and what rides on each link.
+  </div>
+
+  <div class="diagram-frame">
+    <svg viewBox="0 0 1300 900" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace, Menlo, monospace">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--text-dim)"></path>
+        </marker>
+      </defs>
+
+      <!-- ============ CONNECTORS (drawn first, under boxes) ============ -->
+      <g stroke-width="2" fill="none">
+        <!-- Keyboard -> MAIN -->
+        <path d="M150,90 H220" stroke="var(--data)"></path>
+        <!-- Mouse -> CPU -->
+        <path d="M1150,90 H1080" stroke="var(--data)"></path>
+        <!-- MAIN <-> CPU dedicated bus -->
+        <path d="M420,95 H900" stroke="var(--data)" stroke-width="3"></path>
+        <!-- PD brick -> MAIN -->
+        <path d="M500,230 V210 Q500,190 480,190 Q380,190 350,190 V150" stroke="var(--power)" stroke-dasharray="7 5"></path>
+        <!-- PD brick -> CPU -->
+        <path d="M600,230 V150" stroke="var(--power)" stroke-dasharray="7 5" transform="translate(370,-40)"></path>
+        <!-- PD brick -> GPU -->
+        <path d="M560,270 V320" stroke="var(--power)" stroke-dasharray="7 5"></path>
+        <!-- MAIN -> GPU (shared bus, CS1) -->
+        <path d="M330,150 V240 Q330,270 400,280 Q480,300 560,335" stroke="var(--data)"></path>
+        <!-- CPU -> GPU (shared bus, CS2) -->
+        <path d="M960,150 V240 Q960,280 860,300 Q760,320 700,340" stroke="var(--data)"></path>
+        <!-- MAIN -> WROOM (I2C/UART SD relay) -->
+        <path d="M290,150 V420 Q290,470 340,485 Q400,500 470,505" stroke="var(--data)" stroke-width="1.4"></path>
+        <!-- GPU -> WROOM (video-out, dedicated x2, heaviest) -->
+        <path d="M600,410 V460" stroke="var(--data)" stroke-width="5"></path>
+        <!-- Separate PSU -> WROOM -->
+        <path d="M950,470 H730" stroke="var(--power)" stroke-dasharray="7 5"></path>
+        <!-- SD card -> WROOM -->
+        <path d="M760,510 H730" stroke="var(--ground)" stroke-width="3"></path>
+        <!-- WROOM -> CRT (RCA) -->
+        <path d="M600,560 V610" stroke="var(--video)" stroke-dasharray="2 6" stroke-width="3"></path>
+        <!-- Common ground bus across all four boards -->
+        <path d="M310,175 H1050 V370 H310 Z M310,370 V560 H700" stroke="var(--ground)" stroke-dasharray="1 7" stroke-width="1.6"></path>
+      </g>
+
+      <!-- ============ LABELS ON LINES ============ -->
+      <g font-size="12.5" fill="var(--text-dim)">
+        <text x="185" y="82" text-anchor="middle">USB-1</text>
+        <text x="1115" y="82" text-anchor="middle">USB-2</text>
+        <text x="660" y="86" text-anchor="middle" fill="var(--text)" font-size="13">SPI (dedicated) — sync / input relay / SD relay / WiFi relay / compute</text>
+        <text x="180" y="185" text-anchor="middle">5V</text>
+        <text x="750" y="145" text-anchor="middle">5V</text>
+        <text x="540" y="300" text-anchor="middle">5V</text>
+        <text x="420" y="250" text-anchor="middle">SPI shared bus (CS1) — render</text>
+        <text x="890" y="255" text-anchor="middle">SPI shared bus (CS2) — render</text>
+        <text x="245" y="330" text-anchor="middle">I2C/UART ≤1Mbit/s</text>
+        <text x="245" y="346" text-anchor="middle">SD read relay</text>
+        <text x="640" y="440" fill="var(--text)" font-size="13">SPI ×2 dedicated</text>
+        <text x="640" y="456" fill="var(--text)" font-size="13">(sharded) — video-out</text>
+        <text x="840" y="463" text-anchor="middle">5V</text>
+        <text x="745" y="503" text-anchor="middle" font-size="11">microSD</text>
+        <text x="620" y="588" text-anchor="middle" fill="var(--video)">RCA</text>
+        <text x="1060" y="270" fill="var(--ground)" font-size="11">common GND — ties all four boards</text>
+      </g>
+
+      <!-- ============ BOXES ============ -->
+      <!-- Keyboard -->
+      <g>
+        <rect x="20" y="65" width="130" height="50" rx="6" fill="var(--panel)" stroke="var(--panel-line)"></rect>
+        <text x="85" y="95" text-anchor="middle" fill="var(--text-dim)" font-size="13">Keyboard</text>
+      </g>
+      <!-- Mouse -->
+      <g>
+        <rect x="1150" y="65" width="130" height="50" rx="6" fill="var(--panel)" stroke="var(--panel-line)"></rect>
+        <text x="1215" y="95" text-anchor="middle" fill="var(--text-dim)" font-size="13">Mouse</text>
+      </g>
+
+      <!-- MAIN -->
+      <g>
+        <rect x="220" y="50" width="200" height="100" rx="8" fill="var(--panel)" stroke="var(--board-main)" stroke-width="2"></rect>
+        <text x="320" y="90" text-anchor="middle" fill="var(--text)" font-size="17" font-weight="600">MAIN</text>
+        <text x="320" y="110" text-anchor="middle" fill="var(--text-faint)" font-size="12">ESP32-S3 · S3-3</text>
+        <text x="320" y="128" text-anchor="middle" fill="var(--text-faint)" font-size="11">orchestrator · keyboard · WiFi</text>
+      </g>
+
+      <!-- CPU -->
+      <g>
+        <rect x="900" y="50" width="200" height="100" rx="8" fill="var(--panel)" stroke="var(--board-cpu)" stroke-width="2"></rect>
+        <text x="1000" y="90" text-anchor="middle" fill="var(--text)" font-size="17" font-weight="600">CPU</text>
+        <text x="1000" y="110" text-anchor="middle" fill="var(--text-faint)" font-size="12">ESP32-S3 · S3-1</text>
+        <text x="1000" y="128" text-anchor="middle" fill="var(--text-faint)" font-size="11">terminal · mouse · compute</text>
+      </g>
+
+      <!-- PD Brick -->
+      <g>
+        <rect x="430" y="190" width="260" height="80" rx="8" fill="var(--panel)" stroke="var(--power)" stroke-width="1.5" stroke-dasharray="4 3"></rect>
+        <text x="560" y="222" text-anchor="middle" fill="var(--power)" font-size="13" font-weight="600">3-port USB-PD brick</text>
+        <text x="560" y="242" text-anchor="middle" fill="var(--text-faint)" font-size="11">port 1 → MAIN · port 2 → CPU · port 3 → GPU</text>
+        <text x="560" y="258" text-anchor="middle" fill="var(--text-faint)" font-size="11">MAIN/CPU get headroom for their OTG peripheral draw</text>
+      </g>
+
+      <!-- GPU -->
+      <g>
+        <rect x="500" y="320" width="200" height="90" rx="8" fill="var(--panel)" stroke="var(--board-gpu)" stroke-width="2"></rect>
+        <text x="600" y="356" text-anchor="middle" fill="var(--text)" font-size="17" font-weight="600">GPU</text>
+        <text x="600" y="375" text-anchor="middle" fill="var(--text-faint)" font-size="12">ESP32-S3 · S3-2</text>
+        <text x="600" y="393" text-anchor="middle" fill="var(--text-faint)" font-size="11">custom render OS, no ESP-Nix</text>
+      </g>
+
+      <!-- Separate PSU for WROOM -->
+      <g>
+        <rect x="950" y="435" width="150" height="70" rx="8" fill="var(--panel)" stroke="var(--power)" stroke-width="1.5" stroke-dasharray="4 3"></rect>
+        <text x="1025" y="465" text-anchor="middle" fill="var(--power)" font-size="12" font-weight="600">Separate 5V supply</text>
+        <text x="1025" y="483" text-anchor="middle" fill="var(--text-faint)" font-size="10">phone charger is plenty</text>
+      </g>
+
+      <!-- SD card -->
+      <g>
+        <rect x="760" y="480" width="90" height="60" rx="6" fill="var(--panel)" stroke="var(--ground)" stroke-width="1.5"></rect>
+        <text x="805" y="514" text-anchor="middle" fill="var(--text-dim)" font-size="12">microSD</text>
+      </g>
+
+      <!-- WROOM-32E -->
+      <g>
+        <rect x="470" y="460" width="260" height="100" rx="8" fill="var(--panel)" stroke="var(--board-wrom)" stroke-width="2"></rect>
+        <text x="600" y="497" text-anchor="middle" fill="var(--text)" font-size="16" font-weight="600">WROOM-32E</text>
+        <text x="600" y="516" text-anchor="middle" fill="var(--text-faint)" font-size="12">ESP32 (classic)</text>
+        <text x="600" y="533" text-anchor="middle" fill="var(--text-faint)" font-size="11">SD · display-out only, no rendering</text>
+      </g>
+
+      <!-- CRT -->
+      <g>
+        <rect x="520" y="610" width="160" height="130" rx="6" fill="var(--panel)" stroke="var(--panel-line)" stroke-width="2"></rect>
+        <text x="600" y="665" text-anchor="middle" fill="var(--text)" font-size="15" font-weight="600">CRT</text>
+        <text x="600" y="685" text-anchor="middle" fill="var(--text-faint)" font-size="11">own AC mains</text>
+        <text x="600" y="700" text-anchor="middle" fill="var(--text-faint)" font-size="11">(no shared power)</text>
+      </g>
+    </svg>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><span class="swatch" style="background:var(--data)"></span> data / signal (SPI, I2C, UART, USB)</div>
+    <div class="legend-item"><span class="swatch dash"></span> power (5V)</div>
+    <div class="legend-item"><span class="swatch dot"></span> ground / physical</div>
+    <div class="legend-item"><span class="swatch dashdot"></span> analog video (RCA)</div>
+  </div>
+
+  <h2>Per-link spec</h2>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>Link</th><th>Type</th><th>Wires (nominal)</th><th>Carries</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="link">MAIN ↔ CPU</td>
+          <td><span class="tag data">SPI</span> dedicated bus</td>
+          <td class="spec">4</td>
+          <td>USB input relay, sync signals, SD data relay, WiFi relay, offloaded compute. One of the two is the fixed bus master (independent of <code>run set</code>).</td>
+        </tr>
+        <tr>
+          <td class="link">MAIN → GPU</td>
+          <td><span class="tag data">SPI</span> shared bus, own CS</td>
+          <td class="spec">4 + 1 CS</td>
+          <td>Render/draw commands, when MAIN is the active <code>-g</code> source.</td>
+        </tr>
+        <tr>
+          <td class="link">CPU → GPU</td>
+          <td><span class="tag data">SPI</span> shared bus, own CS</td>
+          <td class="spec">(shares above) + 1 CS</td>
+          <td>Render/draw commands, when CPU is the active <code>-g</code> source. Shares the physical bus with MAIN→GPU since only one is ever active at a time.</td>
+        </tr>
+        <tr>
+          <td class="link">GPU → WROOM-32E</td>
+          <td><span class="tag data">SPI ×2</span> dedicated, sharded</td>
+          <td class="spec">~8 (2 buses)</td>
+          <td>Fully-rendered frame, video-out. Highest bandwidth/most timing-critical link in the system - ~9.2Mbit/s sustained (320×240 @ 4bpp, 30fps unique frames held across 60Hz output). Escalates to SPI×1.5 (6 wires) or worst-case fully-split SPI×2 if one shared bus can't keep up.</td>
+        </tr>
+        <tr>
+          <td class="link">MAIN → WROOM-32E</td>
+          <td><span class="tag data">I2C or UART</span></td>
+          <td class="spec">2</td>
+          <td>SD file-read relay. At most ~1Mbit/s needed - doesn't warrant SPI's extra wires.</td>
+        </tr>
+        <tr>
+          <td class="link">Keyboard → MAIN</td>
+          <td><span class="tag data">USB OTG (host)</span></td>
+          <td class="spec">USB-1</td>
+          <td>Raw keystrokes, forwarded on to CPU's terminal over the MAIN↔CPU bus - no local handling on MAIN.</td>
+        </tr>
+        <tr>
+          <td class="link">Mouse → CPU</td>
+          <td><span class="tag data">USB OTG (host)</span></td>
+          <td class="spec">USB-2</td>
+          <td>Pointer input for CPU.</td>
+        </tr>
+        <tr>
+          <td class="link">SD card → WROOM-32E</td>
+          <td><span class="tag ground">Physical slot</span></td>
+          <td class="spec">—</td>
+          <td>Single SD card in the whole system - MAIN and CPU have no SD of their own.</td>
+        </tr>
+        <tr>
+          <td class="link">WROOM-32E → CRT</td>
+          <td><span class="tag video">RCA composite</span></td>
+          <td class="spec">1 (+ shield/GND)</td>
+          <td>Analog video signal only. CRT has its own AC mains supply - no power relationship with the rest of the system.</td>
+        </tr>
+        <tr>
+          <td class="link">PD brick → MAIN/CPU/GPU</td>
+          <td><span class="tag power">5V</span> USB-PD, 3 ports</td>
+          <td class="spec">1 per board</td>
+          <td>MAIN and CPU get the PD brick's ports (need headroom for their OTG peripheral's power draw); GPU gets the third.</td>
+        </tr>
+        <tr>
+          <td class="link">Separate supply → WROOM-32E</td>
+          <td><span class="tag power">5V</span> simple</td>
+          <td class="spec">1</td>
+          <td>Least power-demanding chip - no OTG host duty, no rendering. A phone charger or spare USB port is enough.</td>
+        </tr>
+        <tr>
+          <td class="link">Common ground</td>
+          <td><span class="tag ground">GND</span> shared reference</td>
+          <td class="spec">1 (bussed)</td>
+          <td>Ties MAIN, CPU, GPU, and WROOM-32E together regardless of each having independent power - required for the SPI/I2C/UART signaling above to be reliable.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pin-note">
+    <h3>Before wiring a single pin</h3>
+    <ul>
+      <li>Check each board's datasheet for <strong>strapping pins</strong> (e.g. boot-mode select) and avoid routing peripherals onto them.</li>
+      <li>Check which GPIOs are <strong>already claimed by onboard flash/PSRAM</strong> on that specific board - these aren't available for the GPIO matrix regardless of what the matrix itself allows.</li>
+      <li>Both the S3s and the WROOM-32E can route SPI/I2C/UART to nearly any remaining pin via their GPIO matrix - the assignment is a wiring choice, not a hardware constraint, once the pins above are ruled out.</li>
+      <li>The breadboard is the right place to try the GPU↔WROOM-32E escalation ladder (SPI×1 → ×1.5 → ×2) and confirm real throughput before committing to a permanent build.</li>
+    </ul>
+  </div>
+
+  <footer>ESP-Nix · goals.md · generated from the resolved multi-chip architecture design</footer>
+</div>
+
+</body></html>

@@ -2,8 +2,12 @@
 
 ![ESP-Nix logo](ESP_NIX.png)
 
+*(Pronounced "ESP dash Nix.")*
+
 A minimal declarative operating system for ESP32 with a Unix-like shell interface.
 > **AI Disclaimer:** This project was developed with the assistance of Claude AI. I believe AI-written code should be open source to benefit Everyone and maintain transparency.
+
+Join [The Retro Network](https://discord.gg/VrrYwdhw3d) on Discord.
 
 ## Features
 
@@ -22,8 +26,8 @@ A minimal declarative operating system for ESP32 with a Unix-like shell interfac
 - **Boot scripts + auto NTP**: `.sh` files in `/boot` run in order at every startup, after an automatic clock sync (if WiFi is already saved)
 - **Configurable date/time**: `DATE_FORMAT` (`us`/`iso`) and `TIME_FORMAT` (`24`/`12`) in `/etc/settings/esp-nix.conf` control how `date` displays
 - **System commands**: any `.sh` file in `/system` is runnable from anywhere by name alone (no `./` prefix, no `.sh` extension)
-- **WiFi file server + browser terminal**: `web` serves a file manager and a live shell you can type into from a phone or computer — no app needed
-- **OTA firmware updates**: `update` flashes a `.esp_update` firmware file from the SD card or LittleFS — push it over `web`, then flash without a USB cable
+- **WiFi file server + browser terminal**: `web` serves a file manager and a live shell you can type into from a phone or computer — no app needed. Works on LittleFS alone (no SD card required), with SD used transparently when present
+- **OTA firmware updates**: `update` flashes a firmware file from the SD card or LittleFS — push it over `web`, then flash without a USB cable. Chip-aware: only accepts `.esp_update` (classic ESP32/WROOM-32E-family) or `.esp_s3_update` (ESP32-S3), refusing a mismatched file rather than risking a bad flash
 - **NTP time sync**: `ntp` (or automatically on `web -join`) sets the system clock over WiFi, so `date` is actually correct
 - **Cursor-aware editor**: arrow keys move within a line for mid-line edits; `:d<n>`/`:i<n>` delete or insert by line number
 - **Archive support**: `extract`/`compress` handle real `.zip` plus `.tar.gz`/`.tgz`/`.gz`/`.tar`
@@ -89,13 +93,15 @@ pio run -t upload
 pio device monitor
 ```
 
+ESP32-S3 builds now compile too (`pio run -e main-s3 -t upload`), as part of ongoing multi-chip work — see `goals.md`. The source is right here in this repo like everything else, but there's no pre-built S3 firmware or OTA update path yet (no prior public S3 release to update *from*) — compile it yourself if you want to try it. The classic ESP32/WROOM-32E build above is still the one to use if you're just trying ESP-Nix out.
+
 ## Usage
 
 After booting, you'll see the shell prompt:
 
 ```
 root@esp-nix:/$ help
-ESP-Nix 1.3 - Available commands:
+ESP-Nix 1.3.5 - Available commands:
   help        - Show this help
   ls [-l] [path] - List directory (-l for permissions/size/date)
   pwd         - Print working directory
@@ -164,7 +170,7 @@ ESP-Nix 1.3 - Available commands:
 
 ```bash
 root@esp-nix:/$ uname
-ESP-Nix 1.3
+ESP-Nix 1.3.5
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -205,7 +211,7 @@ A declarative OS for ESP32.
 root@esp-nix:/$ uname > sysinfo.txt
 root@esp-nix:/$ echo "more info" >> sysinfo.txt
 root@esp-nix:/$ cat sysinfo.txt
-ESP-Nix 1.3
+ESP-Nix 1.3.5
 System: ESP32 WROOM32E
 Arch: Xtensa
 Kernel: FreeRTOS
@@ -447,7 +453,7 @@ A neofetch-style system summary — logo on the left, live stats on the right:
 root@esp-nix:/$ nixfetch
    .--.          root@esp-nix
   |o_o |         ------------
-  |:_/ |         OS: ESP-Nix 1.3
+  |:_/ |         OS: ESP-Nix 1.3.5
  //   \ \        Host: ESP32 WROOM32E
 (|     | )       Kernel: FreeRTOS
 /'\_   _/`\      Uptime: 2m
@@ -566,7 +572,7 @@ print "sum_of_squares(3,4) = " & /result
 
 `CALL "file.o" "function" resultVar [arg1] [arg2] ...` — loads the `.o`, calls `function` with up to 6 arguments (decimal or `0x`-hex), and stores its return value in `resultVar` (a plain global, read the same way `/retval` is). See `runmod`'s section below for exactly what a compatible `.o` looks like and how to build one.
 
-**The OS version is readable as `/version`** (a string variable, e.g. `1.3`) — the same version compiled modules read via `host_os_version()`, both pulling from the single `ESP_NIX_VERSION` definition in `src/version.h`.
+**The OS version is readable as `/version`** (a string variable, e.g. `1.3.5`) — the same version compiled modules read via `host_os_version()`, both pulling from the single `ESP_NIX_VERSION` definition in `src/version.h`.
 
 ### User Profile Framework (early)
 
@@ -1092,6 +1098,14 @@ Potential enhancements:
 - User accounts and permissions
 - `PATH`-style multiple script directories, not just `/system`
 
+## License
+
+[GNU General Public License v2.0](LICENSE) (or later) - free to use, modify, and redistribute, as long as derivative works stay open under the same terms. Chosen to match the license of the emulator cores/projects this build incorporates or ports from (`retro-go`, and most of the Genesis/SNES/GBA/DOOM cores it's built on, are GPL-2.0 themselves).
+
+**Please keep credit to this project (ESP-Nix, RetroGigabyte) in anything you build on it** - a friendly ask, not a legal threat. If you fork this, port it, or build a derivative project from it, a visible nod back to the original ESP-Nix project would be appreciated.
+
+**Note on the Sonic decompilation projects (RSDKv3/v4/v5, Mania/Sonic CD/Sonic 1&2):** these ship under their own, stricter non-commercial license (no commercial use, must credit the original RSDK/decompilation authors, the license must carry forward into any fork) - that code stays under its own terms rather than being relicensed as GPL, per its own requirements.
+
 ## Credits
 
 - The `web` file server started from [GPT_ESP32-File_network](https://github.com/RetroGigabyte/GPT_ESP32-File_network), extended here with the browser terminal, WiFi network joining, and SD-hosted page templates.
@@ -1103,3 +1117,7 @@ Potential enhancements:
 - [FreeRTOS](https://www.freertos.org/) - Underlying RTOS
 - [miniz](https://github.com/richgel999/miniz) - Vendored for real `.zip` support
 - [ESP32-targz](https://github.com/tobozo/ESP32-targz) - `.tar`/`.gz`/`.tar.gz` support
+
+## Community
+
+Join [The Retro Network](https://discord.gg/VrrYwdhw3d) on Discord.

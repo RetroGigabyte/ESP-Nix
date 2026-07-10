@@ -8,6 +8,7 @@
 #include "commands.h"
 #include "parser.h"
 #include "input.h"
+#include "version.h"
 
 class Shell {
 private:
@@ -102,7 +103,7 @@ public:
   }
 
   void init() {
-    term.println("ESP-Nix 1.3");
+    term.println("ESP-Nix " ESP_NIX_VERSION);
     term.println("Type 'help' for command list\n");
   }
 

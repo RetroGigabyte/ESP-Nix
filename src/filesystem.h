@@ -203,7 +203,20 @@ private:
     return path == "/sd" || path == "/sd/";
   }
 
-  // Routes to the SD or internal filesystem based on the /sd prefix
+  // Routes to the SD or internal filesystem based on the /sd prefix.
+  //
+  // Future extension point (not implemented - the physical link doesn't
+  // exist yet, see goals.md's multi-chip architecture section): on a
+  // board with no local SD_MMC (e.g. an S3 acting as MAIN), "/sd" could
+  // instead route to a relay that fetches/writes files on WROOM-32E's SD
+  // card over the interconnect (SPI/I2C per goals.md), rather than
+  // /sd paths just being unavailable the way they are today when
+  // sdMounted is false. That would need a real fs::FS-compatible (or
+  // similar) implementation wrapping whatever the actual chip-to-chip
+  // protocol ends up being - out of scope until that link is real, but
+  // this is the one place such a backend would plug in; nothing else in
+  // this class (or WebFileServer, which now only talks to FileSystem)
+  // would need to change to support it.
   fs::FS& backend(const String& path) {
     if (isSdPath(path)) return SD_MMC;
     return LittleFS;

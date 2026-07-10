@@ -13,6 +13,7 @@
 #include "otaupdate.h"
 #include "archive.h"
 #include "retron.h"
+#include "version.h"
 #include <ESP32Ping.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
@@ -235,10 +236,9 @@ private:
       return true;
     }
 
-    if (!fs.sdAvailable()) {
-      term.println("No SD card mounted - insert one and reboot first.");
-      return true;
-    }
+    // No SD-required check here - WebFileServer now goes through
+    // FileSystem, which works on LittleFS alone (e.g. a multi-chip S3
+    // board acting as MAIN, which per the architecture has no local SD).
 
     WebFileServer webServer;
 
@@ -1604,7 +1604,7 @@ private:
   }
 
   bool cmdHelp(const std::vector<String>& args) {
-    out("ESP-Nix 1.3 - Available commands:");
+    out("ESP-Nix " ESP_NIX_VERSION " - Available commands:");
     out("  help        - Show this help");
     out("  ls [-l] [path] - List directory (-l for permissions/size/date)");
     out("  pwd         - Print working directory");
@@ -1758,7 +1758,7 @@ private:
   // info as readable pseudo-files rather than only via commands.
   bool getProcContent(const String& path, String& content) {
     if (path == "/proc/version") {
-      content = "ESP-Nix version 1.3 (FreeRTOS) Xtensa\n";
+      content = "ESP-Nix version " ESP_NIX_VERSION " (FreeRTOS) Xtensa\n";
       return true;
     }
     if (path == "/proc/uptime") {
@@ -1924,8 +1924,8 @@ private:
   }
 
   bool cmdUname(const std::vector<String>& args) {
-    out("ESP-Nix 1.3");
-    out("System: ESP32 WROOM32E");
+    out("ESP-Nix " ESP_NIX_VERSION);
+    out("System: " + String(ESP.getChipModel()));
     out("Arch: Xtensa");
     out("Kernel: FreeRTOS");
     out("Flash: 4MB | RAM: 520KB SRAM (~300KB usable after reserved regions)");
@@ -1976,14 +1976,23 @@ private:
     std::vector<String> info;
     info.push_back("root@esp-nix");
     info.push_back("------------");
-    info.push_back("OS: ESP-Nix 1.3");
-    info.push_back("Host: ESP32 WROOM32E");
+    info.push_back("OS: ESP-Nix " ESP_NIX_VERSION);
+    info.push_back("Host: " + String(ESP.getChipModel()));
     info.push_back("Kernel: FreeRTOS");
     info.push_back("Uptime: " + formatUptime(millis() / 1000));
     info.push_back("Shell: /bin/nix");
-    info.push_back("CPU: Xtensa LX6 @ " + String(ESP.getCpuFreqMHz()) + "MHz (2 cores)");
+    // LX6 (classic ESP32) vs LX7 (S3) - both Xtensa, chip model string is
+    // the only reliable way to tell them apart at runtime.
+    String chipModel = String(ESP.getChipModel());
+    String core = chipModel.indexOf("S3") >= 0 ? "LX7" : "LX6";
+    info.push_back("CPU: Xtensa " + core + " @ " + String(ESP.getCpuFreqMHz()) +
+                    "MHz (" + String(ESP.getChipCores()) + " cores)");
     info.push_back("Memory: " + String((ESP.getHeapSize() - ESP.getFreeHeap()) / 1024) +
                     "KB / " + String(ESP.getHeapSize() / 1024) + "KB");
+    if (ESP.getPsramSize() > 0) {
+      info.push_back("PSRAM: " + String((ESP.getPsramSize() - ESP.getFreePsram()) / 1024) +
+                      "KB / " + String(ESP.getPsramSize() / 1024) + "KB");
+    }
     info.push_back("Disk (/): " + String(LittleFS.usedBytes() / 1024) +
                     "KB / " + String(LittleFS.totalBytes() / 1024) + "KB");
 
